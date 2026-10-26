@@ -1,5 +1,6 @@
 import { positionAt, type PlaybackState, type TrackInfo } from '@sds/shared';
-import { serverToAudioTime, type ClockSync } from '../sync/clockSync';
+import { audioTimeToServer, serverToAudioTime, type ClockSync } from '../sync/clockSync';
+import { DRIFT, correctionLog, decideDrift, driftLog, wrappedDiff } from './drift';
 import { audioEngine } from './engine';
 
 /** A scheduled start closer than this is treated as already missed. */
@@ -19,6 +20,10 @@ export interface ActiveSource {
   serverStart: number;
   loop: boolean;
   duration: number;
+  /** Rate bookkeeping: position = ratePos + (ctxTime - rateCtx) * rate. */
+  rate: number;
+  rateCtx: number;
+  ratePos: number;
 }
 
 /**
@@ -34,6 +39,9 @@ export class Player {
   current: ActiveSource | null = null;
   private appliedSeq = -1;
   private appliedTrack: string | null = null;
+  private last: { state: PlaybackState; track: TrackInfo; buffer: AudioBuffer } | null = null;
+  private driftTimer: ReturnType<typeof setInterval> | null = null;
+  private correcting = false;
 
   constructor(
     private readonly clock: ClockSync,
@@ -50,6 +58,7 @@ export class Player {
   apply(state: PlaybackState, track: TrackInfo | null, buffer: AudioBuffer | null): void {
     const ctx = audioEngine.ctx;
     if (!ctx) return;
+    this.last = track && buffer && state.trackId === track.id ? { state, track, buffer } : null;
 
     const sameState = state.seq === this.appliedSeq && state.trackId === this.appliedTrack;
     // Same state and still sounding (or nothing should be sounding): nothing to do.
@@ -113,7 +122,11 @@ export class Player {
       serverStart: startServer,
       loop: track.loop,
       duration,
+      rate: 1,
+      rateCtx: ctxStart,
+      ratePos: startOffset,
     };
+    this.correcting = false;
     source.onended = () => {
       if (this.current === active) {
         this.current = null;
@@ -127,7 +140,72 @@ export class Player {
   stopNow(): void {
     this.stopAt(null);
     this.appliedSeq = -1;
+    this.last = null;
+    this.stopDriftLoop();
     this.onPlayingChange(false);
+  }
+
+  /** Where this device's audio is in the track at context time `c`. */
+  private positionAtCtx(cur: ActiveSource, c: number): number {
+    return cur.ratePos + (c - cur.rateCtx) * cur.rate;
+  }
+
+  /**
+   * One drift check: compare the position of the sample leaving the speaker
+   * right now with where the room says the track should be at that moment.
+   */
+  checkDrift(): void {
+    const ctx = audioEngine.ctx;
+    const cur = this.current;
+    const last = this.last;
+    if (!ctx || !cur || !last || last.state.status !== 'playing' || ctx.state !== 'running') return;
+    const ts = ctx.getOutputTimestamp?.();
+    const c = ts?.contextTime && ts.contextTime > 0 ? ts.contextTime : ctx.currentTime;
+    if (c < cur.ctxStart) return; // scheduled, not sounding yet
+    const heardServer = audioTimeToServer(
+      c,
+      this.clock,
+      ctx,
+      () => performance.now(),
+      this.getNudgeMs(),
+    );
+    if (heardServer < last.state.startServerMs) return; // a handover is still pending
+    const actual = this.positionAtCtx(cur, c);
+    if (!cur.loop && actual >= cur.duration) return;
+    const expected = positionAt(last.state, heardServer);
+    const driftMs = wrappedDiff(actual, expected, cur.loop ? cur.duration : null) * 1000;
+    driftLog.push({ at: Date.now(), driftMs, rate: cur.rate });
+
+    const action = decideDrift(driftMs, this.correcting);
+    if (action.kind === 'none') return;
+    if (action.kind === 'reschedule') {
+      correctionLog.push({ at: Date.now(), kind: 'reschedule', driftMs, rate: 1, source: 'track' });
+      this.invalidate();
+      this.apply(last.state, last.track, last.buffer);
+      return;
+    }
+    const rate = action.kind === 'settle' ? 1 : action.rate;
+    this.setRate(cur, rate, ctx.currentTime);
+    this.correcting = action.kind === 'rate';
+    correctionLog.push({ at: Date.now(), kind: action.kind, driftMs, rate, source: 'track' });
+  }
+
+  private setRate(cur: ActiveSource, rate: number, now: number): void {
+    if (rate === cur.rate) return;
+    cur.ratePos = this.positionAtCtx(cur, now);
+    cur.rateCtx = now;
+    cur.rate = rate;
+    cur.source.playbackRate.setValueAtTime(rate, now);
+  }
+
+  private startDriftLoop(): void {
+    this.driftTimer ??= setInterval(() => this.checkDrift(), DRIFT.checkEveryMs);
+  }
+
+  private stopDriftLoop(): void {
+    if (this.driftTimer) clearInterval(this.driftTimer);
+    this.driftTimer = null;
+    this.correcting = false;
   }
 
   /** Where this device's audio actually is in the track right now, if playing. */
@@ -135,7 +213,7 @@ export class Player {
     const ctx = audioEngine.ctx;
     const cur = this.current;
     if (!ctx || !cur || ctx.currentTime < cur.ctxStart) return null;
-    const pos = cur.offset + (ctx.currentTime - cur.ctxStart) * cur.source.playbackRate.value;
+    const pos = this.positionAtCtx(cur, ctx.currentTime);
     return cur.loop ? pos % cur.duration : pos;
   }
 
@@ -162,6 +240,8 @@ export class Player {
   private mark(state: PlaybackState, playing: boolean): void {
     this.appliedSeq = state.seq;
     this.appliedTrack = state.trackId;
+    if (playing) this.startDriftLoop();
+    else this.stopDriftLoop();
     this.onPlayingChange(playing);
   }
 }

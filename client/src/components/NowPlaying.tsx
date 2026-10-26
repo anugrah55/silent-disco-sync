@@ -4,6 +4,7 @@ import type { LoadState } from '../audio/trackStore';
 import { useServerNow } from '../hooks/useServerNow';
 import { formatTime } from '../lib/format';
 import type { RoomSession, SessionState } from '../room/session';
+import { FlashToggle } from './BeatFlash';
 import { LiveBadge } from './LiveShareCard';
 import { VolumeControl } from './VolumeControl';
 
@@ -138,7 +139,17 @@ export function NowPlaying({ session, state }: { session: RoomSession; state: Se
         </div>
       )}
 
+      {state.isHost && (
+        <button
+          type="button"
+          className="btn-ghost min-h-11 text-base"
+          onClick={() => session.syncTest()}
+        >
+          Sync test: everyone plays the click
+        </button>
+      )}
       <VolumeControl />
+      <FlashToggle />
     </section>
   );
 }

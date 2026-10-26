@@ -27,3 +27,15 @@ export function createClickBuffer(ctx: BaseAudioContext): AudioBuffer {
   }
   return buffer;
 }
+
+/** One short click, for the calibration helper. */
+export function createSingleClick(ctx: BaseAudioContext): AudioBuffer {
+  const sr = ctx.sampleRate;
+  const buffer = ctx.createBuffer(1, Math.round(0.03 * sr), sr);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const t = i / sr;
+    data[i] = 0.9 * Math.sin(2 * Math.PI * 1760 * t) * Math.exp(-t * 160);
+  }
+  return buffer;
+}

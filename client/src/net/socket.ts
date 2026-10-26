@@ -22,6 +22,8 @@ export class SyncSocket {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   status: SocketStatus = 'closed';
+  /** performance.now() of the last frame received (any kind). */
+  lastRecvAt = 0;
 
   constructor(private readonly url: string) {}
 
@@ -38,10 +40,12 @@ export class SyncSocket {
     this.ws = ws;
     ws.onopen = () => {
       this.attempt = 0;
+      this.lastRecvAt = performance.now();
       this.setStatus('open');
     };
     ws.onmessage = (ev: MessageEvent<string | ArrayBuffer>) => {
       const recvAt = performance.now();
+      this.lastRecvAt = recvAt;
       if (ev.data instanceof ArrayBuffer) {
         const data = ev.data;
         this.binaryHandlers.forEach((h) => h(data));
@@ -73,6 +77,25 @@ export class SyncSocket {
       const delay = Math.min(8000, 500 * 2 ** this.attempt++) * (0.75 + Math.random() * 0.5);
       this.retryTimer = setTimeout(() => this.open(), delay);
     };
+  }
+
+  /**
+   * Drop the current connection and open a new one right away. For sockets
+   * that look open but are dead (network switched, phone slept): TCP can take
+   * minutes to notice on its own.
+   */
+  reconnectNow(): void {
+    if (this.stopped) return;
+    const old = this.ws;
+    if (old) {
+      old.onclose = null;
+      old.onmessage = null;
+      old.close(4000, 'stale');
+    }
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.ws = null;
+    this.setStatus('reconnecting');
+    this.open();
   }
 
   /** Reconnect immediately, e.g. when the tab becomes visible again. */

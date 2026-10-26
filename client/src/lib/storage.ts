@@ -33,6 +33,6 @@ export const keys = {
   clientId: 'sds.clientId',
   hostToken: (code: string) => `sds.host.${code}`,
   nudge: 'sds.nudgeMs',
-  reducedFlash: 'sds.reducedFlash',
+  flash: 'sds.flash',
   volume: 'sds.volume',
 } as const;

@@ -2,6 +2,8 @@ import { ClockSync, type Scheduler } from '../sync/clockSync';
 import { wsUrl } from '../lib/api';
 import { SyncSocket } from './socket';
 
+const STALE_AFTER_MS = 25_000;
+
 const browserScheduler: Scheduler = {
   now: () => performance.now(),
   setTimeout: (fn, ms) => window.setTimeout(fn, ms),
@@ -37,6 +39,17 @@ export class Connection {
         this.clock.stop();
       }
     });
+    // Network came back (Wi-Fi handover, airplane mode off): the old socket is
+    // almost certainly dead, so reconnect now instead of waiting for TCP.
+    window.addEventListener('online', () => this.socket.reconnectNow());
+    // The clock pings every 10 s, so 25 s of silence means a dead socket.
+    setInterval(() => {
+      const s = this.socket;
+      // Hidden tabs get their timers (and so their pings) throttled: don't misread that.
+      if (document.hidden) return;
+      if (s.status === 'open' && performance.now() - s.lastRecvAt > STALE_AFTER_MS)
+        s.reconnectNow();
+    }, 5000);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
       // Background tabs throttle timers and may have missed re-syncs.

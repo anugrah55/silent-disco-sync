@@ -1,4 +1,5 @@
 import { decodeLiveChunk, type LiveState } from '@sds/shared';
+import { correctionLog } from '../audio/drift';
 import { audioEngine } from '../audio/engine';
 import { serverToAudioTime, type ClockSync } from '../sync/clockSync';
 
@@ -65,8 +66,19 @@ export class LiveReceiver {
     if (this.anchor === null || ++this.sinceCheck >= REANCHOR_EVERY) {
       this.sinceCheck = 0;
       const fresh = this.computeAnchor(live);
-      if (this.anchor === null || Math.abs(fresh - this.anchor) > REANCHOR_THRESHOLD_SEC)
+      if (this.anchor === null) {
         this.anchor = fresh;
+      } else if (Math.abs(fresh - this.anchor) > REANCHOR_THRESHOLD_SEC) {
+        // Same sign convention as tracks: positive = this device was ahead.
+        correctionLog.push({
+          at: Date.now(),
+          kind: 'reanchor',
+          driftMs: (fresh - this.anchor) * 1000,
+          rate: 1,
+          source: 'live',
+        });
+        this.anchor = fresh;
+      }
     }
     const when = this.anchor + chunk.index * chunkSec;
     if (when < ctx.currentTime + 0.005) {

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { correctionLog, driftLog, type CorrectionLogEntry } from '../audio/drift';
+import { Calibration } from '../components/Calibration';
 import { ConnectionPill } from '../components/ConnectionPill';
 import { ScatterChart, TimeChart } from '../components/charts';
 import { SERIES } from '../components/chartUtils';
@@ -13,6 +15,13 @@ const qualityDot: Record<Quality, string> = {
   ok: 'bg-ok',
   bad: 'bg-bad',
   unknown: 'bg-haze/50',
+};
+
+const correctionLabel: Record<CorrectionLogEntry['kind'], string> = {
+  rate: 'Rate nudge',
+  settle: 'Back to 1.0×',
+  reschedule: 'Re-schedule',
+  reanchor: 'Live re-anchor',
 };
 
 const fmt = (v: number, digits = 1) => (Number.isFinite(v) ? v.toFixed(digits) : '–');
@@ -104,6 +113,8 @@ export function Lab() {
     group: s.kept ? 'kept' : 'dropped',
   }));
 
+  const drift = driftLog.toArray();
+  const corrections = correctionLog.toArray();
   const error = clock.errorMs;
   const q = syncQuality(clock.synced ? error : null);
   const slewLeft = clock.synced ? target - clock.offsetMs : Number.NaN;
@@ -241,16 +252,57 @@ export function Lab() {
           </button>
           <span>later →</span>
         </div>
+        <Calibration />
       </section>
+
+      <TimeChart
+        title="Playback drift"
+        subtitle="Measured every 2 s while a track plays: where this device's audio is vs where the room says it should be. Positive = ahead."
+        series={[
+          {
+            name: 'Drift',
+            color: SERIES.blue,
+            kind: 'line',
+            points: drift.map((d) => ({ x: (d.at - (drift[0]?.at ?? 0)) / 1000, y: d.driftMs })),
+          },
+        ]}
+        xFormat={mmss}
+        yFormat={(v) => v.toFixed(1)}
+        includeZero
+      />
 
       <section className="card" aria-labelledby="drift-h">
         <h2 id="drift-h" className="font-display text-base font-bold">
           Drift corrections
         </h2>
         <p className="mt-1 text-sm text-haze">
-          No corrections logged yet. While a track plays, every playback-rate nudge and re-schedule
-          is listed here.
+          Under 15 ms: left alone. 15-80 ms: playback rate eased by up to ±0.3% (inaudible) until
+          back under 3 ms. Over 80 ms: re-scheduled at the next boundary.
         </p>
+        {corrections.length === 0 ? (
+          <p className="mt-3 text-sm text-haze">No corrections yet.</p>
+        ) : (
+          <ul className="mt-3 flex flex-col divide-y divide-line text-sm tabular-nums">
+            {[...corrections]
+              .reverse()
+              .slice(0, 25)
+              .map((c) => (
+                <li key={`${c.at}-${c.kind}-${c.driftMs}`} className="flex gap-3 py-1.5">
+                  <span className="w-20 text-haze">{new Date(c.at).toLocaleTimeString()}</span>
+                  <span className="w-24">{correctionLabel[c.kind]}</span>
+                  <span className="w-20 text-right">
+                    {c.driftMs > 0 ? '+' : ''}
+                    {c.driftMs.toFixed(1)} ms
+                  </span>
+                  <span className="text-haze">
+                    {c.kind === 'rate'
+                      ? `rate ${c.rate >= 1 ? '+' : ''}${((c.rate - 1) * 100).toFixed(2)}%`
+                      : c.source}
+                  </span>
+                </li>
+              ))}
+          </ul>
+        )}
       </section>
 
       <details className="card">

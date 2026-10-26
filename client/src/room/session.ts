@@ -1,4 +1,5 @@
 import {
+  CLICK_TRACK,
   uploadResponseSchema,
   type CommandMessage,
   type ErrorCode,
@@ -11,6 +12,7 @@ import { trackStore, type LoadState } from '../audio/trackStore';
 import { LiveCapture, type CaptureStatus } from '../live/capture';
 import { LiveReceiver } from '../live/receiver';
 import { getClientId } from '../lib/ids';
+import { keepScreenOn } from '../lib/wakeLock';
 import { nudge } from '../lib/nudge';
 import { getConnection, type Connection } from '../net/connection';
 import type { SocketStatus } from '../net/socket';
@@ -92,6 +94,14 @@ export class RoomSession {
   /** While anything is audible the clock slews instead of stepping. */
   private updatePlaying(): void {
     this.conn.playing = this.filePlaying || this.live.active;
+    keepScreenOn(this.conn.playing);
+  }
+
+  /** Host: everyone plays the 120 BPM click so people can hear the alignment. */
+  syncTest(): void {
+    this.command({ action: 'load', trackId: CLICK_TRACK.id });
+    // The click is synthesized on each device, so there is nothing to wait for.
+    this.command({ action: 'play', force: true });
   }
 
   /** Host: start sharing a tab's audio. Call straight from a click handler. */
@@ -152,9 +162,10 @@ export class RoomSession {
           error: null,
           updateAvailable: msg.buildId !== null && msg.buildId !== __BUILD_ID__,
         });
-        // (Re)joined: re-announce readiness and rejoin playback at the live position.
+        // (Re)joined: re-announce readiness and catch up with anything that changed
+        // while we were away. Audio that is still playing on an unchanged state
+        // keeps going; drift control absorbs any small difference.
         this.readySent = null;
-        this.player.invalidate();
         this.syncPlayback();
         this.live.setLive(null);
         // The server drops a live share when the host disconnects: start a new timeline.

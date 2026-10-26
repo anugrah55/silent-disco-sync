@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } fr
 import { Link, useParams } from 'react-router';
 import { LIMITS, ROOM_CODE_RE } from '@sds/shared';
 import { audioEngine } from '../audio/engine';
+import { BeatFlash } from '../components/BeatFlash';
 import { ConnectionPill } from '../components/ConnectionPill';
 import { ListenerList } from '../components/ListenerList';
 import { LiveShareCard } from '../components/LiveShareCard';
@@ -92,6 +93,7 @@ function Room({ code }: { code: string }) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-5 px-5 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <SoundOverlay />
+      {state.room && <BeatFlash room={state.room} />}
       <header className="flex items-center justify-between">
         <Link
           to="/"

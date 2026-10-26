@@ -28,6 +28,10 @@ export default tseslint.config(
     },
   },
   {
+    files: ['client/public/sw.js'],
+    languageOptions: { globals: globals.serviceworker },
+  },
+  {
     files: ['client/public/worklets/**/*.js'],
     languageOptions: { globals: globals.audioWorklet },
   },

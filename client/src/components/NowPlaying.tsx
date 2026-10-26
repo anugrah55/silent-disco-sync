@@ -6,6 +6,7 @@ import { formatTime } from '../lib/format';
 import type { RoomSession, SessionState } from '../room/session';
 import { FlashToggle } from './BeatFlash';
 import { LiveBadge } from './LiveShareCard';
+import { Visualizer } from './Visualizer';
 import { VolumeControl } from './VolumeControl';
 
 /** Track, progress, this device's load status, and (for the host) transport. */
@@ -55,6 +56,8 @@ export function NowPlaying({ session, state }: { session: RoomSession; state: Se
           {status}
         </p>
       </div>
+
+      <Visualizer />
 
       {track && <DeviceLoad load={load} onRetry={() => session.retryTrack()} />}
 
@@ -168,6 +171,7 @@ function LiveNowPlaying({ state }: { state: SessionState }) {
         </div>
         <LiveBadge />
       </div>
+      <Visualizer />
       <p className="text-sm text-haze" role="status">
         Every device plays the shared tab {(live.delayMs / 1000).toFixed(1)} s behind the source,
         all at the same moment.

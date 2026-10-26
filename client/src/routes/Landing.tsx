@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, ROOM_CODE_RE } from '@sds/shared';
+import { ColdStartHint } from '../components/ColdStartHint';
+import { useDelayedFlag } from '../hooks/useDelayedFlag';
 import { createRoom } from '../lib/api';
 import { keys, local } from '../lib/storage';
 
@@ -12,6 +14,7 @@ export function Landing() {
   const [joining, setJoining] = useState(false);
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const slow = useDelayedFlag(creating, 3000);
 
   async function start() {
     setCreating(true);
@@ -52,10 +55,23 @@ export function Landing() {
           Line up your phones and press play. They start on the same millisecond, so it sounds like
           one big sound system instead of an echo.
         </p>
+        <ul className="mt-6 flex flex-wrap gap-2 text-sm" aria-label="Features">
+          {[
+            'Join with a QR code',
+            'Millisecond sync',
+            'Play any tab, even YouTube',
+            'No app to install',
+          ].map((f) => (
+            <li key={f} className="rounded-full border border-line bg-white/5 px-3 py-1 text-haze">
+              {f}
+            </li>
+          ))}
+        </ul>
       </section>
 
       {/* Actions sit at the bottom so they're reachable with one thumb. */}
       <section className="flex flex-col gap-3" aria-label="Get started">
+        {slow && <ColdStartHint />}
         {error && (
           <p role="alert" className="rounded-2xl bg-bad/15 px-4 py-3 text-bad">
             {error}

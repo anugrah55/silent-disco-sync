@@ -359,9 +359,9 @@ function Stat({
   children?: ReactNode;
 }) {
   return (
-    <div className={`card flex flex-col gap-1 ${hero ? 'col-span-2 sm:col-span-1' : ''}`}>
+    <div className="card flex flex-col gap-1">
       <p className="text-sm text-haze">{label}</p>
-      <p className={`font-semibold ${hero ? 'text-4xl' : 'text-2xl'}`}>{value}</p>
+      <p className={`font-semibold ${hero ? 'text-3xl' : 'text-2xl'}`}>{value}</p>
       {children && <div className="text-xs text-haze">{children}</div>}
     </div>
   );

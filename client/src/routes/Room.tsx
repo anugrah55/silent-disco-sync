@@ -3,7 +3,9 @@ import { Link, useParams } from 'react-router';
 import { LIMITS, ROOM_CODE_RE } from '@sds/shared';
 import { audioEngine } from '../audio/engine';
 import { BeatFlash } from '../components/BeatFlash';
+import { ColdStartHint } from '../components/ColdStartHint';
 import { ConnectionPill } from '../components/ConnectionPill';
+import { useDelayedFlag } from '../hooks/useDelayedFlag';
 import { ListenerList } from '../components/ListenerList';
 import { LiveShareCard } from '../components/LiveShareCard';
 import { NowPlaying } from '../components/NowPlaying';
@@ -25,6 +27,7 @@ export function RoomRoute() {
   // A result only counts for the code/attempt it was fetched for; anything else is still loading.
   const key = `${code}:${attempt}`;
   const check: Check = result?.key === key ? result.check : 'checking';
+  const slow = useDelayedFlag(check === 'checking', 3000);
 
   useEffect(() => {
     if (!valid) return;
@@ -58,7 +61,10 @@ export function RoomRoute() {
   }
   if (check === 'checking') {
     return (
-      <main className="grid min-h-dvh place-items-center text-haze">Finding room {code}…</main>
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-6 text-haze">
+        <p>Finding room {code}…</p>
+        {slow && <ColdStartHint />}
+      </main>
     );
   }
   return <Room key={code} code={code} />;
@@ -68,6 +74,10 @@ function Room({ code }: { code: string }) {
   // Sessions persist across routes, so a trip to the Sync Lab keeps your seat.
   const session = useMemo(() => getRoomSession(code), [code]);
   const state = useSyncExternalStore(session.subscribe, session.getState);
+  const lostConnection = useDelayedFlag(
+    state.phase === 'joined' && state.socket === 'reconnecting',
+    3000,
+  );
 
   const hostToken = local.get(keys.hostToken(code)) ?? undefined;
 
@@ -105,6 +115,13 @@ function Room({ code }: { code: string }) {
         </Link>
         <ConnectionPill status={state.socket} />
       </header>
+
+      {lostConnection && (
+        <p role="alert" className="rounded-2xl bg-ok/15 px-4 py-3 text-sm text-ok">
+          Connection lost, reconnecting… Anything already scheduled keeps playing, and you'll rejoin
+          in sync automatically.
+        </p>
+      )}
 
       {state.updateAvailable && (
         <div role="alert" className="flex items-center gap-3 rounded-2xl bg-neon-cyan/15 px-4 py-3">

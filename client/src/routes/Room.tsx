@@ -8,7 +8,7 @@ import { QrCode } from '../components/QrCode';
 import { SoundOverlay } from '../components/SoundOverlay';
 import { joinUrl, roomExists } from '../lib/api';
 import { keys, local } from '../lib/storage';
-import { RoomSession } from '../room/session';
+import { getRoomSession } from '../room/session';
 import { NotFound } from './NotFound';
 
 type Check = 'checking' | 'ok' | 'missing' | 'offline';
@@ -61,9 +61,9 @@ export function RoomRoute() {
 }
 
 function Room({ code }: { code: string }) {
-  const session = useMemo(() => new RoomSession(code), [code]);
+  // Sessions persist across routes, so a trip to the Sync Lab keeps your seat.
+  const session = useMemo(() => getRoomSession(code), [code]);
   const state = useSyncExternalStore(session.subscribe, session.getState);
-  useEffect(() => () => session.stop(), [session]);
 
   const hostToken = local.get(keys.hostToken(code)) ?? undefined;
 
@@ -133,9 +133,9 @@ function Room({ code }: { code: string }) {
           <h2 id="listeners-h" className="font-display text-lg font-bold">
             Listeners
           </h2>
-          <span className="text-sm text-haze tabular-nums">
-            {state.rttMs !== null && `your RTT ${state.rttMs.toFixed(0)} ms`}
-          </span>
+          <Link to="/lab" className="text-sm text-haze tabular-nums hover:text-white">
+            {state.sync ? `RTT ${state.sync.rttMs.toFixed(0)} ms · ` : ''}Sync Lab →
+          </Link>
         </div>
         {state.room ? (
           <ListenerList members={state.room.members} meId={state.clientId} />

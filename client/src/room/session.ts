@@ -1,7 +1,9 @@
 import type { ErrorCode, RoomSnapshot } from '@sds/shared';
-import { wsUrl } from '../lib/api';
 import { getClientId } from '../lib/ids';
-import { SyncSocket, type SocketStatus } from '../net/socket';
+import { nudge } from '../lib/nudge';
+import { getConnection, type Connection } from '../net/connection';
+import type { SocketStatus } from '../net/socket';
+import type { SyncStatsSnapshot } from '../sync/clockSync';
 
 export interface SessionState {
   phase: 'idle' | 'connecting' | 'joined' | 'error';
@@ -10,31 +12,34 @@ export interface SessionState {
   room: RoomSnapshot | null;
   clientId: string;
   isHost: boolean;
-  /** Phase 1 placeholder: latest single-ping RTT. Replaced by clockSync in Phase 2. */
-  rttMs: number | null;
+  sync: SyncStatsSnapshot | null;
 }
 
 /**
- * Framework-free room connection: owns the socket, (re)joins on every open,
- * and exposes an immutable state snapshot for React's useSyncExternalStore.
+ * Membership in one room, on top of the tab's shared connection. Joins on
+ * every socket open (so reconnects rejoin automatically), reports sync quality
+ * after every sync burst, and exposes an immutable snapshot for React's
+ * useSyncExternalStore. Sessions outlive the room screen, so visiting the
+ * Sync Lab and coming back keeps your seat.
  */
 export class RoomSession {
-  private socket: SyncSocket | null = null;
+  private readonly conn: Connection;
   private listeners = new Set<() => void>();
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private cleanups: Array<() => void> = [];
   private name = '';
   private hostToken: string | undefined;
   private state: SessionState;
 
   constructor(readonly code: string) {
+    this.conn = getConnection();
     this.state = {
       phase: 'idle',
-      socket: 'closed',
+      socket: this.conn.socket.status,
       error: null,
       room: null,
       clientId: getClientId(),
       isHost: false,
-      rttMs: null,
+      sync: this.conn.clock.synced ? this.conn.clock.stats() : null,
     };
   }
 
@@ -53,79 +58,113 @@ export class RoomSession {
   start(name: string, hostToken: string | undefined): void {
     this.name = name;
     this.hostToken = hostToken;
-    if (this.socket) return;
-    const socket = new SyncSocket(wsUrl());
-    this.socket = socket;
-    this.set({ phase: 'connecting', socket: 'connecting', error: null });
+    if (this.cleanups.length) return;
+    const { socket, clock } = this.conn;
+    this.set({ phase: 'connecting', error: null });
 
-    socket.onStatus((status, info) => {
-      this.set({ socket: status });
-      if (status === 'open') this.sendJoin();
-      if (status === 'closed' && info?.code === 4001) {
-        this.set({
-          phase: 'error',
-          error: { code: 'replaced', message: 'This room was opened in another tab.' },
-        });
-      }
-      if (status === 'closed' && info?.code === 4004) {
-        this.set({ phase: 'error', error: { code: 'expired', message: 'This room has expired.' } });
-      }
-    });
-    socket.on('welcome', (msg) => {
-      this.set({ phase: 'joined', isHost: msg.isHost, room: msg.room, error: null });
-    });
-    socket.on('roomState', (msg) => this.set({ room: msg.room }));
-    socket.on('presence', (msg) => {
-      if (this.state.room) this.set({ room: { ...this.state.room, members: msg.members } });
-    });
-    socket.on('error', (msg) => {
-      const fatal = msg.code === 'room_not_found' || msg.code === 'room_full';
-      this.set({
-        error: { code: msg.code, message: msg.message },
-        ...(fatal && { phase: 'error' }),
-      });
-      if (fatal) this.stop();
-    });
-    socket.on('pong', (msg, recvAt) => {
-      const rtt = recvAt - msg.t0;
-      const offset = msg.ts - (msg.t0 + rtt / 2);
-      this.set({ rttMs: rtt });
-      socket.send({
-        type: 'syncReport',
-        sync: { offsetMs: offset, rttMs: rtt, jitterMs: 0, errorMs: rtt / 2, samples: 1 },
-      });
-    });
+    this.cleanups.push(
+      socket.onStatus((status, info) => {
+        this.set({ socket: status });
+        if (status === 'open') this.sendJoin();
+        if (status === 'closed' && info?.code === 4001) {
+          this.fail('replaced', 'This room was opened in another tab.');
+        }
+        if (status === 'closed' && info?.code === 4004) {
+          this.fail('expired', 'This room has expired.');
+        }
+      }),
+      socket.on('welcome', (msg) => {
+        if (msg.room.code !== this.code) return;
+        this.set({ phase: 'joined', isHost: msg.isHost, room: msg.room, error: null });
+        this.reportSync();
+        socket.send({ type: 'nudgeReport', nudgeMs: nudge.get() });
+      }),
+      socket.on('roomState', (msg) => {
+        if (msg.room.code === this.code) this.set({ room: msg.room });
+      }),
+      socket.on('presence', (msg) => {
+        if (this.state.room) this.set({ room: { ...this.state.room, members: msg.members } });
+      }),
+      socket.on('error', (msg) => {
+        if (msg.code === 'room_not_found' || msg.code === 'room_full') {
+          this.fail(msg.code, msg.message);
+        } else if (msg.code !== 'not_joined') {
+          this.set({ error: { code: msg.code, message: msg.message } });
+        }
+      }),
+      clock.onUpdate(() => this.reportSync()),
+      nudge.subscribe(() => {
+        if (this.state.phase === 'joined')
+          socket.send({ type: 'nudgeReport', nudgeMs: nudge.get() });
+      }),
+    );
 
-    this.pingTimer = setInterval(() => socket.send({ type: 'ping', t0: performance.now() }), 2000);
-    document.addEventListener('visibilitychange', this.onVisibility);
-    socket.connect();
+    this.set({ socket: socket.status });
+    if (socket.status === 'open') this.sendJoin();
   }
 
   private sendJoin(): void {
-    this.socket?.send({
+    this.conn.socket.send({
       type: 'join',
       code: this.code,
       clientId: this.state.clientId,
       name: this.name,
       ...(this.hostToken && { hostToken: this.hostToken }),
     });
-    this.socket?.send({ type: 'ping', t0: performance.now() });
   }
 
-  private onVisibility = (): void => {
-    if (document.visibilityState === 'visible') this.socket?.kick();
-  };
+  private reportSync(): void {
+    const { clock, socket } = this.conn;
+    if (!clock.synced) return;
+    const s = clock.stats();
+    this.set({ sync: s });
+    if (this.state.phase !== 'joined') return;
+    socket.send({
+      type: 'syncReport',
+      sync: {
+        offsetMs: s.offsetMs,
+        rttMs: s.rttMs,
+        jitterMs: s.jitterMs,
+        errorMs: s.errorMs,
+        boundMs: s.boundMs,
+        samples: s.samples,
+      },
+    });
+  }
 
-  stop(): void {
-    if (this.pingTimer) clearInterval(this.pingTimer);
-    this.pingTimer = null;
-    document.removeEventListener('visibilitychange', this.onVisibility);
-    this.socket?.close();
-    this.socket = null;
+  private fail(code: NonNullable<SessionState['error']>['code'], message: string): void {
+    this.set({ phase: 'error', error: { code, message } });
+    this.detach();
+    sessions.delete(this.code);
+  }
+
+  private detach(): void {
+    this.cleanups.forEach((c) => c());
+    this.cleanups = [];
   }
 
   leave(): void {
-    this.socket?.send({ type: 'leave' });
-    this.stop();
+    if (this.state.phase === 'joined') this.conn.socket.send({ type: 'leave' });
+    this.detach();
+    sessions.delete(this.code);
   }
+}
+
+const sessions = new Map<string, RoomSession>();
+
+/** The tab's session for a room; creating one leaves any other room first. */
+export function getRoomSession(code: string): RoomSession {
+  let s = sessions.get(code);
+  if (!s) {
+    for (const other of sessions.values()) other.leave();
+    s = new RoomSession(code);
+    sessions.set(code, s);
+  }
+  return s;
+}
+
+/** The room this tab is currently in, if any (used by the Sync Lab). */
+export function currentRoomSession(): RoomSession | null {
+  for (const s of sessions.values()) if (s.getState().phase === 'joined') return s;
+  return null;
 }

@@ -71,7 +71,7 @@ describe('websocket', () => {
 
     guest.send({
       type: 'syncReport',
-      sync: { offsetMs: 1, rttMs: 40, jitterMs: 2, errorMs: 20, samples: 5 },
+      sync: { offsetMs: 1, rttMs: 40, jitterMs: 2, errorMs: 3, boundMs: 20, samples: 5 },
     });
     const presence = await host.next('presence');
     expect(presence.members.find((m) => m.name === 'Guest')?.sync?.rttMs).toBe(40);

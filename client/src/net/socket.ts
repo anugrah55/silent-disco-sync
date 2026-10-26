@@ -20,12 +20,14 @@ export class SyncSocket {
   private attempt = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
-  status: SocketStatus = 'connecting';
+  status: SocketStatus = 'closed';
 
   constructor(private readonly url: string) {}
 
   connect(): void {
+    if (this.ws) return;
     this.stopped = false;
+    this.setStatus('connecting');
     this.open();
   }
 
@@ -55,6 +57,8 @@ export class SyncSocket {
       if (this.ws !== ws) return;
       this.ws = null;
       if (this.stopped || TERMINAL_CODES.has(ev.code)) {
+        // Stay down: kick() must not revive a socket another tab replaced.
+        this.stopped = true;
         this.setStatus('closed', { code: ev.code });
         return;
       }

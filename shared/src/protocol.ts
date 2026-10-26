@@ -20,9 +20,14 @@ const trackId = z.string().regex(/^[A-Za-z0-9_.-]{1,64}$/);
 
 export const syncStatsSchema = z.object({
   offsetMs: finite,
+  /** Typical (median) round trip of the latest burst; drives lead time. */
   rttMs: finite.nonnegative(),
+  /** Std deviation of the trusted samples' offsets. */
   jitterMs: finite.nonnegative(),
+  /** Estimated error of the offset (jitter + stability + pending slew). */
   errorMs: finite.nonnegative(),
+  /** Worst-case error if the path were fully asymmetric: best RTT / 2. */
+  boundMs: finite.nonnegative(),
   samples: z.number().int().nonnegative(),
 });
 export type SyncStats = z.infer<typeof syncStatsSchema>;

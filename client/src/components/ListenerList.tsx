@@ -39,7 +39,11 @@ export function ListenerList({ members, meId }: { members: Member[]; meId: strin
             </span>
             <span
               className="flex items-center gap-2 rounded-full bg-ink px-3 py-1 text-sm tabular-nums"
-              title={m.sync ? `RTT ${m.sync.rttMs.toFixed(1)} ms` : 'Measuring…'}
+              title={
+                m.sync
+                  ? `Estimated error ±${m.sync.errorMs.toFixed(1)} ms · RTT ${m.sync.rttMs.toFixed(0)} ms · worst case ±${m.sync.boundMs.toFixed(0)} ms`
+                  : 'Measuring…'
+              }
             >
               <span aria-hidden className={`size-2.5 rounded-full ${dot[q]}`} />
               <span className="sr-only">Sync quality: </span>

@@ -1,0 +1,20 @@
+# Render Blueprint: one web service serves the built client, the REST API and the WebSocket.
+services:
+  - type: web
+    name: silent-disco-sync
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: '20'
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: '1'
+      - key: LEAD_MS_DEFAULT
+        value: '2000'

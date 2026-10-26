@@ -1,0 +1,12 @@
+{
+  "name": "@sds/sim",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "sim": "tsx src/index.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

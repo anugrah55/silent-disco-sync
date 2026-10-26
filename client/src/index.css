@@ -1,0 +1,109 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Unbounded Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --color-night: #07060d;
+  --color-ink: #110f1c;
+  --color-panel: #17142a;
+  --color-line: #2a2545;
+  --color-haze: #a59fc4;
+  --color-neon-pink: #ff2bd6;
+  --color-neon-violet: #8b5cf6;
+  --color-neon-cyan: #22e6ff;
+  --color-neon-lime: #b6ff3b;
+  --color-good: #3dffa2;
+  --color-ok: #ffc53d;
+  --color-bad: #ff4d6d;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    @apply bg-night font-sans text-white antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  :focus-visible {
+    outline: 3px solid var(--color-neon-cyan);
+    outline-offset: 3px;
+    border-radius: 0.75rem;
+  }
+}
+
+@utility btn {
+  @apply inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl px-6 text-lg font-semibold transition-[transform,opacity,box-shadow] duration-150 select-none active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn text-night;
+  background: linear-gradient(
+    100deg,
+    var(--color-neon-pink),
+    var(--color-neon-violet) 55%,
+    var(--color-neon-cyan)
+  );
+  box-shadow: 0 10px 40px -10px color-mix(in oklab, var(--color-neon-pink) 70%, transparent);
+}
+@utility btn-ghost {
+  @apply btn border border-line bg-white/5 text-white hover:bg-white/10;
+}
+@utility card {
+  @apply rounded-3xl border border-line bg-panel/80 p-5 backdrop-blur;
+}
+@utility field {
+  @apply min-h-14 w-full rounded-2xl border border-line bg-ink px-4 text-lg text-white placeholder:text-haze/60 focus:border-neon-cyan focus:outline-none;
+}
+@utility text-gradient {
+  background: linear-gradient(
+    100deg,
+    var(--color-neon-pink),
+    var(--color-neon-violet) 50%,
+    var(--color-neon-cyan)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Slow drifting neon blobs behind every screen. */
+.aurora::before,
+.aurora::after {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  width: 70vmax;
+  height: 70vmax;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.35;
+  pointer-events: none;
+}
+.aurora::before {
+  top: -30vmax;
+  left: -25vmax;
+  background: radial-gradient(circle, var(--color-neon-pink), transparent 65%);
+  animation: drift 18s ease-in-out infinite alternate;
+}
+.aurora::after {
+  bottom: -35vmax;
+  right: -30vmax;
+  background: radial-gradient(circle, var(--color-neon-cyan), transparent 65%);
+  animation: drift 22s ease-in-out infinite alternate-reverse;
+}
+@keyframes drift {
+  to {
+    transform: translate(12vmax, 8vmax) scale(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aurora::before,
+  .aurora::after {
+    animation: none;
+  }
+}

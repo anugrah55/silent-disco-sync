@@ -44,7 +44,7 @@ export function isOriginAllowed(
 export function attachWebSocket(
   server: Server,
   rooms: RoomManager,
-  opts: { allowedOrigins: string[] },
+  opts: { allowedOrigins: string[]; buildId: string | null },
 ): WebSocketServer {
   const wss = new WebSocketServer({
     noServer: true,
@@ -229,6 +229,7 @@ export function attachWebSocket(
       clientId: result.client.id,
       isHost: result.client.isHost,
       room: rooms.snapshot(room),
+      buildId: opts.buildId,
     });
     broadcastRoomState(room);
   }

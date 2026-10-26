@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { pathToFileURL } from 'node:url';
-import { createApp } from './app';
+import { createApp, readBuildId } from './app';
 import { loadConfig, type Config } from './config';
 import { RoomManager } from './rooms';
 import { attachWebSocket } from './ws';
@@ -18,7 +18,10 @@ export async function startServer(overrides: Partial<Config> = {}): Promise<Runn
   const rooms = new RoomManager({ leadMsDefault: config.leadMsDefault });
   const app = createApp(config, rooms);
   const server = createServer(app);
-  const wss = attachWebSocket(server, rooms, { allowedOrigins: config.allowedOrigins });
+  const wss = attachWebSocket(server, rooms, {
+    allowedOrigins: config.allowedOrigins,
+    buildId: readBuildId(config),
+  });
   rooms.startSweeper();
 
   await new Promise<void>((resolve) => server.listen(config.port, resolve));

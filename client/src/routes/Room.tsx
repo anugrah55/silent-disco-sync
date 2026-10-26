@@ -101,6 +101,19 @@ function Room({ code }: { code: string }) {
         <ConnectionPill status={state.socket} />
       </header>
 
+      {state.updateAvailable && (
+        <div role="alert" className="flex items-center gap-3 rounded-2xl bg-neon-cyan/15 px-4 py-3">
+          <p className="flex-1 text-sm">A new version is live. Reload to stay in sync.</p>
+          <button
+            type="button"
+            className="rounded-xl bg-neon-cyan px-4 py-2 font-semibold text-night"
+            onClick={() => location.reload()}
+          >
+            Reload
+          </button>
+        </div>
+      )}
+
       <section className="text-center">
         <p className="text-sm tracking-[0.25em] text-haze uppercase">Room code</p>
         <p className="font-display text-6xl font-extrabold tracking-[0.2em] text-gradient">

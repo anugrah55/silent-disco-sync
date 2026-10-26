@@ -153,6 +153,13 @@ export const welcomeMsg = z.object({
   clientId,
   isHost: z.boolean(),
   room: roomSnapshotSchema,
+  /**
+   * Build the server is serving (null in dev). A tab loaded before a deploy
+   * compares this with its own build and asks the user to reload.
+   * Protocol rule: server->client fields may be added freely (zod strips
+   * unknown keys); new client->server fields must be optional.
+   */
+  buildId: z.string().nullable(),
 });
 
 export const roomStateMsg = z.object({ type: z.literal('roomState'), room: roomSnapshotSchema });

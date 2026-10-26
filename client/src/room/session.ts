@@ -13,6 +13,8 @@ export interface SessionState {
   clientId: string;
   isHost: boolean;
   sync: SyncStatsSnapshot | null;
+  /** The server runs a newer build than this tab: the user should reload. */
+  updateAvailable: boolean;
 }
 
 /**
@@ -40,6 +42,7 @@ export class RoomSession {
       clientId: getClientId(),
       isHost: false,
       sync: this.conn.clock.synced ? this.conn.clock.stats() : null,
+      updateAvailable: false,
     };
   }
 
@@ -75,7 +78,13 @@ export class RoomSession {
       }),
       socket.on('welcome', (msg) => {
         if (msg.room.code !== this.code) return;
-        this.set({ phase: 'joined', isHost: msg.isHost, room: msg.room, error: null });
+        this.set({
+          phase: 'joined',
+          isHost: msg.isHost,
+          room: msg.room,
+          error: null,
+          updateAvailable: msg.buildId !== null && msg.buildId !== __BUILD_ID__,
+        });
         this.reportSync();
         socket.send({ type: 'nudgeReport', nudgeMs: nudge.get() });
       }),
@@ -88,7 +97,11 @@ export class RoomSession {
       socket.on('error', (msg) => {
         if (msg.code === 'room_not_found' || msg.code === 'room_full') {
           this.fail(msg.code, msg.message);
-        } else if (msg.code !== 'not_joined') {
+        } else if (msg.code === 'bad_message' || msg.code === 'not_joined') {
+          // Protocol hiccups (usually a stale tab after a deploy) mean nothing to
+          // a listener; the update banner covers the stale-tab case.
+          console.warn('[sds] server rejected a message:', msg.message);
+        } else {
           this.set({ error: { code: msg.code, message: msg.message } });
         }
       }),

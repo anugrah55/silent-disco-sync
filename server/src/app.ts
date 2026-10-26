@@ -1,13 +1,27 @@
 import express, { type ErrorRequestHandler } from 'express';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CreateRoomResponse } from '@sds/shared';
 import { ROOM_CODE_RE } from '@sds/shared';
 import { serverNow } from './clock';
 import type { Config } from './config';
 import type { RoomManager } from './rooms';
+
+/** Where the built client lives (served in production, absent in dev). */
+export function clientDistDir(config: Config): string {
+  return config.clientDist ?? path.resolve(import.meta.dirname, '../../client/dist');
+}
+
+/** The client build id written by the Vite build, or null when there is no build. */
+export function readBuildId(config: Config): string | null {
+  try {
+    return readFileSync(path.join(clientDistDir(config), 'build-id.txt'), 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 export function createApp(config: Config, rooms: RoomManager): express.Express {
   const app = express();
@@ -84,7 +98,7 @@ export function createApp(config: Config, rooms: RoomManager): express.Express {
   });
 
   // Built client (production). In dev, Vite serves the client and proxies /api and /ws here.
-  const clientDist = config.clientDist ?? path.resolve(import.meta.dirname, '../../client/dist');
+  const clientDist = clientDistDir(config);
   if (existsSync(path.join(clientDist, 'index.html'))) {
     app.use(
       express.static(clientDist, {

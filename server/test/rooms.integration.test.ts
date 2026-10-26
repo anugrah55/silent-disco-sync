@@ -63,6 +63,7 @@ describe('websocket', () => {
     host.send({ type: 'join', code, clientId: 'host-client-1', name: 'Host', hostToken });
     const hw = await host.next('welcome');
     expect(hw.isHost).toBe(true);
+    expect(hw.buildId).toBeNull(); // no client build in tests
 
     guest.send({ type: 'join', code, clientId: 'guest-client-1', name: 'Guest' });
     const gw = await guest.next('welcome');

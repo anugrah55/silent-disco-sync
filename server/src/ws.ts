@@ -5,7 +5,10 @@ import {
   LIMITS,
   WS_PATH,
   clientMessageSchema,
+  LIVE,
   applyCommand,
+  peekLiveHeader,
+  positionAt,
   type ClientMessage,
   type CommandMessage,
   type ErrorCode,
@@ -19,6 +22,11 @@ const PRESENCE_THROTTLE_MS = 500;
 /** Token bucket per socket: a 20-ping sync burst is ~10 msg/s, leave headroom. */
 const RATE_PER_SEC = 30;
 const RATE_BURST = 60;
+/** Live audio arrives at 10 chunks/s; allow catch-up bursts after a stall. */
+const LIVE_RATE_PER_SEC = 25;
+const LIVE_RATE_BURST = 60;
+/** A listener this far behind on its socket gets chunks dropped, not queued. */
+const MAX_BUFFERED_BYTES = 1024 * 1024;
 
 interface Conn {
   ws: WebSocket;
@@ -27,6 +35,7 @@ interface Conn {
   alive: boolean;
   tokens: number;
   lastRefill: number;
+  liveTokens: number;
 }
 
 export function isOriginAllowed(
@@ -74,6 +83,7 @@ export function attachWebSocket(
       alive: true,
       tokens: RATE_BURST,
       lastRefill: Date.now(),
+      liveTokens: LIVE_RATE_BURST,
     };
     conns.set(ws, conn);
     ws.on('pong', () => (conn.alive = true));
@@ -83,7 +93,13 @@ export function attachWebSocket(
       const { room, client } = conn;
       if (room && client && client.ws === ws) {
         rooms.disconnect(room, client);
-        schedulePresence(room);
+        if (client.isHost && room.live) {
+          // No host, no audio: end the live share; the host restarts it on rejoin.
+          room.live = null;
+          broadcastRoomState(room);
+        } else {
+          schedulePresence(room);
+        }
       }
     });
     ws.on('error', () => ws.terminate());
@@ -139,20 +155,23 @@ export function attachWebSocket(
     );
   }
 
-  function takeToken(conn: Conn): boolean {
+  function refill(conn: Conn): void {
     const now = Date.now();
-    conn.tokens = Math.min(
-      RATE_BURST,
-      conn.tokens + ((now - conn.lastRefill) / 1000) * RATE_PER_SEC,
-    );
+    const elapsed = (now - conn.lastRefill) / 1000;
+    conn.tokens = Math.min(RATE_BURST, conn.tokens + elapsed * RATE_PER_SEC);
+    conn.liveTokens = Math.min(LIVE_RATE_BURST, conn.liveTokens + elapsed * LIVE_RATE_PER_SEC);
     conn.lastRefill = now;
+  }
+
+  function takeToken(conn: Conn): boolean {
+    refill(conn);
     if (conn.tokens < 1) return false;
     conn.tokens -= 1;
     return true;
   }
 
   function onMessage(conn: Conn, data: RawData, isBinary: boolean): void {
-    if (isBinary) return sendError(conn, 'bad_message', 'binary frames are not supported');
+    if (isBinary) return relayLive(conn, data);
     if (!takeToken(conn)) return sendError(conn, 'rate_limited', 'slow down');
 
     let parsed: ClientMessage;
@@ -208,12 +227,77 @@ export function attachWebSocket(
     }
   }
 
+  /** Host-only binary live-audio chunk: validate the header and fan it out. */
+  function relayLive(conn: Conn, data: RawData): void {
+    const { room, client } = conn;
+    if (!room || !client?.isHost || client.ws !== conn.ws || !room.live) return; // drop stray audio
+    refill(conn);
+    if (conn.liveTokens < 1) return;
+    conn.liveTokens -= 1;
+    const buf = Buffer.isBuffer(data)
+      ? data
+      : Array.isArray(data)
+        ? Buffer.concat(data)
+        : Buffer.from(data);
+    const head = peekLiveHeader(buf);
+    if (!head || head.streamId !== room.live.streamId || head.samples > room.live.chunkSamples)
+      return;
+    for (const c of room.clients.values()) {
+      const ws = c.ws;
+      if (!ws || ws.readyState !== ws.OPEN) continue;
+      if (ws.bufferedAmount > MAX_BUFFERED_BYTES) continue; // slow listener: drop, don't queue
+      ws.send(buf, { binary: true });
+    }
+  }
+
   function handleCommand(conn: Conn, room: Room, cmd: CommandMessage): void {
     rooms.touch(room);
     if (cmd.action === 'setLead') {
       room.leadOverrideMs = cmd.leadMs;
       return broadcastRoomState(room);
     }
+    if (cmd.action === 'liveStart') {
+      const now = serverNow();
+      if (Math.abs(cmd.startServerMs - now) > 10_000) {
+        return sendError(
+          conn,
+          'invalid_command',
+          'Your clock is not synced yet. Try again in a moment.',
+        );
+      }
+      // Stop any file playback right away: one source of sound at a time.
+      if (room.playback.status === 'playing') {
+        const track = room.track;
+        room.playback = {
+          ...room.playback,
+          status: 'paused',
+          startServerMs: now,
+          positionAtStartSec: positionAt(
+            room.playback,
+            now,
+            track?.durationSec ?? null,
+            track?.loop ?? false,
+          ),
+          seq: room.playback.seq + 1,
+        };
+      }
+      room.live = {
+        streamId: ++room.liveSeq,
+        startServerMs: cmd.startServerMs,
+        sampleRate: cmd.sampleRate,
+        chunkSamples: cmd.chunkSamples,
+        // Covers capture, upload, relay and the slowest listener's download.
+        delayMs: Math.min(LIVE.maxDelayMs, Math.max(LIVE.minDelayMs, rooms.leadMs(room) + 500)),
+        label: cmd.label,
+      };
+      return broadcastRoomState(room);
+    }
+    if (cmd.action === 'liveStop') {
+      room.live = null;
+      return broadcastRoomState(room);
+    }
+    // Any file command takes over from a live share.
+    room.live = null;
     if (cmd.action === 'load') {
       const info = rooms.trackInfo(room, cmd.trackId);
       if (!info || !info.available) {

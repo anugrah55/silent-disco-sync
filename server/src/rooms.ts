@@ -5,6 +5,7 @@ import {
   LIMITS,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
+  type LiveState,
   type Member,
   type PlaybackState,
   type RoomSnapshot,
@@ -40,6 +41,10 @@ export interface Room {
   lastActivity: number;
   /** Host uploads; files live in the OS temp dir and are deleted with the room. */
   uploads: Map<string, Upload>;
+  /** Live tab-audio share in progress, if any. */
+  live: LiveState | null;
+  /** Last live stream id handed out, so restarts never reuse one. */
+  liveSeq: number;
 }
 
 export interface Upload {
@@ -108,6 +113,8 @@ export class RoomManager {
       leadOverrideMs: null,
       lastActivity: this.now(),
       uploads: new Map(),
+      live: null,
+      liveSeq: 0,
     };
     this.rooms.set(code, room);
     return room;
@@ -205,6 +212,7 @@ export class RoomManager {
       track: room.track,
       uploads: [...room.uploads.values()].map((u) => u.info),
       leadMs: this.leadMs(room),
+      live: room.live,
     };
   }
 

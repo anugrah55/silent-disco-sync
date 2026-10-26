@@ -7,6 +7,8 @@ export const LIMITS = {
   maxNameLength: 24,
   roomIdleMs: 2 * 60 * 60 * 1000,
   wsMaxPayloadBytes: 16 * 1024,
+  /** 200 ms at 24 kHz; keeps one binary frame well under wsMaxPayloadBytes. */
+  maxLiveChunkSamples: 4800,
 } as const;
 
 export const LEAD = {
@@ -30,4 +32,12 @@ export const CLICK_TRACK = {
   get durationSec() {
     return (this.bars * 4 * 60) / this.bpm;
   },
+} as const;
+
+/** Live share audio format: mono 16-bit PCM, 100 ms per chunk (~384 kbit/s). */
+export const LIVE = {
+  sampleRate: 24_000,
+  chunkSamples: 2_400,
+  minDelayMs: 2_000,
+  maxDelayMs: 5_000,
 } as const;

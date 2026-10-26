@@ -75,6 +75,22 @@ export const memberSchema = z.object({
 });
 export type Member = z.infer<typeof memberSchema>;
 
+/**
+ * Live share: the host streams a browser tab's audio. Chunk n covers server
+ * time [startServerMs + n * chunkMs, + chunkMs) and every device plays it at
+ * that time + delayMs, so all devices sound together, delayMs behind the tab.
+ */
+export const liveStateSchema = z.object({
+  /** Changes whenever the host (re)starts or re-anchors the stream. */
+  streamId: z.number().int().nonnegative(),
+  startServerMs: finite,
+  sampleRate: z.number().int().min(8000).max(48000),
+  chunkSamples: z.number().int().positive().max(LIMITS.maxLiveChunkSamples),
+  delayMs: finite.positive(),
+  label: z.string().max(80),
+});
+export type LiveState = z.infer<typeof liveStateSchema>;
+
 export const roomSnapshotSchema = z.object({
   code: roomCode,
   members: z.array(memberSchema),
@@ -83,6 +99,8 @@ export const roomSnapshotSchema = z.object({
   /** Tracks the host uploaded to this room (deleted when the room expires). */
   uploads: z.array(trackInfoSchema),
   leadMs: finite,
+  /** Non-null while the host is live-sharing tab audio. */
+  live: liveStateSchema.nullable(),
 });
 export type RoomSnapshot = z.infer<typeof roomSnapshotSchema>;
 
@@ -132,6 +150,16 @@ export const commandMsg = z.discriminatedUnion('action', [
     /** null = automatic lead time from the worst RTT. */
     leadMs: z.number().int().min(LEAD.minMs).max(LEAD.maxMs).nullable(),
   }),
+  z.object({
+    type: z.literal('command'),
+    action: z.literal('liveStart'),
+    /** Server time of the first sample of chunk 0, from the host's synced clock. */
+    startServerMs: finite,
+    sampleRate: z.number().int().min(8000).max(48000),
+    chunkSamples: z.number().int().positive().max(LIMITS.maxLiveChunkSamples),
+    label: z.string().max(80),
+  }),
+  z.object({ type: z.literal('command'), action: z.literal('liveStop') }),
 ]);
 
 export const syncReportMsg = z.object({ type: z.literal('syncReport'), sync: syncStatsSchema });

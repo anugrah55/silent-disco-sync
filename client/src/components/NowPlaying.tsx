@@ -4,6 +4,7 @@ import type { LoadState } from '../audio/trackStore';
 import { useServerNow } from '../hooks/useServerNow';
 import { formatTime } from '../lib/format';
 import type { RoomSession, SessionState } from '../room/session';
+import { LiveBadge } from './LiveShareCard';
 import { VolumeControl } from './VolumeControl';
 
 /** Track, progress, this device's load status, and (for the host) transport. */
@@ -26,6 +27,8 @@ export function NowPlaying({ session, state }: { session: RoomSession; state: Se
   else if (playing) status = track.loop ? 'Playing (looping)' : 'Playing';
   else if (playback.status === 'paused' && startsIn > 0) status = 'Pausing…';
   else status = position > 0 ? 'Paused' : 'Ready to play';
+
+  if (room.live) return <LiveNowPlaying state={state} />;
 
   function commitSeek(v: number) {
     // Only after an actual drag/arrow change: a stray Tab keyup must not reschedule audio.
@@ -135,6 +138,30 @@ export function NowPlaying({ session, state }: { session: RoomSession; state: Se
         </div>
       )}
 
+      <VolumeControl />
+    </section>
+  );
+}
+
+function LiveNowPlaying({ state }: { state: SessionState }) {
+  const live = state.room!.live!;
+  return (
+    <section className="card flex flex-col gap-4" aria-labelledby="np-h">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs tracking-[0.2em] text-haze uppercase">Now playing</p>
+          <h2 id="np-h" className="line-clamp-2 font-display text-xl font-bold break-words">
+            {live.label}
+          </h2>
+          <p className="text-sm text-haze">Live from the host's browser</p>
+        </div>
+        <LiveBadge />
+      </div>
+      <p className="text-sm text-haze" role="status">
+        Every device plays the shared tab {(live.delayMs / 1000).toFixed(1)} s behind the source,
+        all at the same moment.
+        {state.isHost && ' Use the shared tab to change songs or pause.'}
+      </p>
       <VolumeControl />
     </section>
   );

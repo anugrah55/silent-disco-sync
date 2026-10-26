@@ -8,6 +8,8 @@ import {
 import { audioEngine } from '../audio/engine';
 import { Player } from '../audio/player';
 import { trackStore, type LoadState } from '../audio/trackStore';
+import { LiveCapture, type CaptureStatus } from '../live/capture';
+import { LiveReceiver } from '../live/receiver';
 import { getClientId } from '../lib/ids';
 import { nudge } from '../lib/nudge';
 import { getConnection, type Connection } from '../net/connection';
@@ -26,6 +28,8 @@ export interface SessionState {
   updateAvailable: boolean;
   /** Download/decode progress of the room's current track on this device. */
   trackLoad: LoadState;
+  /** Host only: this tab's live tab-audio share. */
+  liveCapture: CaptureStatus;
 }
 
 /** A command message without its `type` tag (distributes over the union). */
@@ -50,6 +54,9 @@ export class RoomSession {
   private hostToken: string | undefined;
   private state: SessionState;
   readonly player: Player;
+  readonly live: LiveReceiver;
+  private readonly capture: LiveCapture;
+  private filePlaying = false;
   private readySent: string | null = null;
   private nudgeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -65,10 +72,44 @@ export class RoomSession {
       sync: this.conn.clock.synced ? this.conn.clock.stats() : null,
       updateAvailable: false,
       trackLoad: { status: 'idle' },
+      liveCapture: { state: 'idle' },
     };
     this.player = new Player(this.conn.clock, nudge.get, (playing) => {
-      this.conn.playing = playing;
+      this.filePlaying = playing;
+      this.updatePlaying();
     });
+    this.live = new LiveReceiver(this.conn.clock, nudge.get);
+    this.capture = new LiveCapture({
+      clock: this.conn.clock,
+      start: (p) => this.command({ action: 'liveStart', ...p }),
+      stop: () => this.command({ action: 'liveStop' }),
+      sendBinary: (d) => this.conn.socket.sendBinary(d),
+      onStatus: (liveCapture) => this.set({ liveCapture }),
+    });
+  }
+
+  /** While anything is audible the clock slews instead of stepping. */
+  private updatePlaying(): void {
+    this.conn.playing = this.filePlaying || this.live.active;
+  }
+
+  /** Host: start sharing a tab's audio. Call straight from a click handler. */
+  startLiveShare(): void {
+    void this.capture.start();
+  }
+
+  stopLiveShare(): void {
+    this.capture.stop();
+  }
+
+  /** Apply the room's live-share state to this device (and the host's capture). */
+  private syncLive(): void {
+    const live = this.state.room?.live ?? null;
+    this.live.setLive(live);
+    this.capture.onLiveState(live);
+    // The server ended a confirmed share (host loaded a file, or it timed out).
+    if (!live && this.capture.active && this.capture.confirmed) this.capture.stop(false);
+    this.updatePlaying();
   }
 
   getState = (): SessionState => this.state;
@@ -114,6 +155,10 @@ export class RoomSession {
         this.readySent = null;
         this.player.invalidate();
         this.syncPlayback();
+        this.live.setLive(null);
+        // The server drops a live share when the host disconnects: start a new timeline.
+        if (this.capture.active) this.capture.reanchor();
+        this.syncLive();
         this.reportSync();
         socket.send({ type: 'nudgeReport', nudgeMs: nudge.get() });
       }),
@@ -122,7 +167,9 @@ export class RoomSession {
         // A command went through, so any earlier "not ready" warning is stale.
         this.set({ room: msg.room, error: null });
         this.syncPlayback();
+        this.syncLive();
       }),
+      socket.onBinary((data) => this.live.onFrame(data)),
       socket.on('presence', (msg) => {
         if (this.state.room) this.set({ room: { ...this.state.room, members: msg.members } });
       }),
@@ -149,6 +196,7 @@ export class RoomSession {
         if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
         this.nudgeTimer = setTimeout(() => {
           this.player.invalidate();
+          this.live.invalidate();
           this.syncPlayback();
         }, 300);
       }),
@@ -161,6 +209,7 @@ export class RoomSession {
         // schedule; rejoin at the live position once it runs again.
         if (s === 'running') {
           this.player.invalidate();
+          this.live.invalidate();
           this.syncPlayback();
         }
       }),
@@ -285,6 +334,8 @@ export class RoomSession {
     this.cleanups = [];
     if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
     this.player.stopNow();
+    this.live.setLive(null);
+    this.capture.stop();
   }
 
   leave(): void {

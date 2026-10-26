@@ -17,6 +17,7 @@ export class SyncSocket {
   private ws: WebSocket | null = null;
   private handlers = new Map<string, Set<(msg: ServerMessage, recvAt: number) => void>>();
   private statusHandlers = new Set<(s: SocketStatus, info?: { code: number }) => void>();
+  private binaryHandlers = new Set<(data: ArrayBuffer) => void>();
   private attempt = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -33,13 +34,19 @@ export class SyncSocket {
 
   private open(): void {
     const ws = new WebSocket(this.url);
+    ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
       this.attempt = 0;
       this.setStatus('open');
     };
-    ws.onmessage = (ev: MessageEvent<string>) => {
+    ws.onmessage = (ev: MessageEvent<string | ArrayBuffer>) => {
       const recvAt = performance.now();
+      if (ev.data instanceof ArrayBuffer) {
+        const data = ev.data;
+        this.binaryHandlers.forEach((h) => h(data));
+        return;
+      }
       let data: unknown;
       try {
         data = JSON.parse(ev.data);
@@ -87,6 +94,19 @@ export class SyncSocket {
     if (this.ws?.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify(msg));
     return true;
+  }
+
+  /** Send a binary frame (live audio). Drops it if the socket is backed up. */
+  sendBinary(data: ArrayBuffer): boolean {
+    const ws = this.ws;
+    if (ws?.readyState !== WebSocket.OPEN || ws.bufferedAmount > 512 * 1024) return false;
+    ws.send(data);
+    return true;
+  }
+
+  onBinary(handler: (data: ArrayBuffer) => void): () => void {
+    this.binaryHandlers.add(handler);
+    return () => this.binaryHandlers.delete(handler);
   }
 
   on<T extends ServerMessage['type']>(type: T, handler: Handler<T>): () => void {

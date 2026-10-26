@@ -1,3 +1,4 @@
+import { LIVE, decodeLiveChunk, encodeLiveChunk } from '@sds/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { boot, TestClient } from './helpers';
 
@@ -191,6 +192,61 @@ describe('scheduled playback', () => {
     const s = await host.next('roomState');
     expect(s.room.leadMs).toBe(4 * 600 + 500);
     host.close();
+    guest.close();
+  });
+});
+
+describe('live share relay', () => {
+  it('relays host audio chunks to everyone, and ignores guests and stale streams', async () => {
+    const { host, guest } = await roomWithHostAndGuest();
+    const now = await serverTime(host);
+    host.send({
+      type: 'command',
+      action: 'liveStart',
+      startServerMs: now,
+      sampleRate: LIVE.sampleRate,
+      chunkSamples: LIVE.chunkSamples,
+      label: 'YouTube tab',
+    });
+    const { room } = await guest.next('roomState');
+    expect(room.live).toMatchObject({ streamId: 1, sampleRate: 24000, label: 'YouTube tab' });
+    expect(room.live!.delayMs).toBeGreaterThanOrEqual(LIVE.minDelayMs);
+
+    const chunk = encodeLiveChunk(
+      room.live!.streamId,
+      0,
+      new Float32Array(LIVE.chunkSamples).fill(0.25),
+    );
+    host.ws.send(Buffer.from(chunk));
+    guest.ws.send(Buffer.from(encodeLiveChunk(room.live!.streamId, 1, new Float32Array(10)))); // not host
+    host.ws.send(Buffer.from(encodeLiveChunk(99, 2, new Float32Array(10)))); // wrong stream
+
+    await new Promise((r) => setTimeout(r, 300));
+    expect(guest.binary).toHaveLength(1);
+    expect(host.binary).toHaveLength(1); // the host plays the relayed stream too
+    const got = decodeLiveChunk(new Uint8Array(guest.binary[0]!))!;
+    expect(got).toMatchObject({ streamId: 1, index: 0 });
+    expect(got.samples[100]).toBeCloseTo(0.25, 3);
+
+    host.send({ type: 'command', action: 'liveStop' });
+    expect((await guest.next('roomState')).room.live).toBeNull();
+    host.close();
+    guest.close();
+  });
+
+  it('ends the live share when the host disconnects', async () => {
+    const { host, guest } = await roomWithHostAndGuest();
+    host.send({
+      type: 'command',
+      action: 'liveStart',
+      startServerMs: await serverTime(host),
+      sampleRate: LIVE.sampleRate,
+      chunkSamples: LIVE.chunkSamples,
+      label: 'tab',
+    });
+    await guest.next('roomState');
+    host.close();
+    expect((await guest.next('roomState')).room.live).toBeNull();
     guest.close();
   });
 });

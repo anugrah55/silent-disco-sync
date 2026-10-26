@@ -4,6 +4,7 @@ import { LIMITS, ROOM_CODE_RE } from '@sds/shared';
 import { audioEngine } from '../audio/engine';
 import { ConnectionPill } from '../components/ConnectionPill';
 import { ListenerList } from '../components/ListenerList';
+import { LiveShareCard } from '../components/LiveShareCard';
 import { NowPlaying } from '../components/NowPlaying';
 import { TrackPicker } from '../components/TrackPicker';
 import { QrCode } from '../components/QrCode';
@@ -126,6 +127,8 @@ function Room({ code }: { code: string }) {
 
       {state.room && <NowPlaying session={session} state={state} />}
 
+      {state.isHost && state.room && <LiveShareCard session={session} state={state} />}
+
       {state.isHost && state.room && <TrackPicker session={session} state={state} />}
 
       {state.isHost && (
@@ -134,7 +137,7 @@ function Room({ code }: { code: string }) {
           code={code}
           onLocalhost={onLocalhost}
           // Big QR until the music starts; then it folds away to keep controls in reach.
-          compact={!!state.room?.track}
+          compact={!!state.room?.track || !!state.room?.live}
         />
       )}
       {!state.isHost && me && (

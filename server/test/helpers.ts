@@ -21,12 +21,18 @@ export async function boot(): Promise<Running & { base: string; wsUrl: string }>
 /** A ws test client that buffers messages so tests can await them in order. */
 export class TestClient {
   readonly ws: WebSocket;
+  /** Binary frames received (live audio chunks), in order. */
+  readonly binary: Buffer[] = [];
   private queue: ServerMessage[] = [];
   private waiters: Array<{ type: string; resolve: (m: ServerMessage) => void }> = [];
 
   constructor(url: string, origin: string) {
     this.ws = new WebSocket(url, { origin });
-    this.ws.on('message', (data) => {
+    this.ws.on('message', (data, isBinary) => {
+      if (isBinary) {
+        this.binary.push(Buffer.from(data as Buffer));
+        return;
+      }
       const msg = serverMessageSchema.parse(JSON.parse(data.toString()));
       const i = this.waiters.findIndex((w) => w.type === msg.type);
       if (i >= 0) this.waiters.splice(i, 1)[0]!.resolve(msg);

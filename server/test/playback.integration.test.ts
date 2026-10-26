@@ -250,3 +250,42 @@ describe('live share relay', () => {
     guest.close();
   });
 });
+
+describe('live share is not lost by accident', () => {
+  async function liveRoom() {
+    const r = await roomWithHostAndGuest();
+    r.host.send({
+      type: 'command',
+      action: 'liveStart',
+      startServerMs: await serverTime(r.host),
+      sampleRate: LIVE.sampleRate,
+      chunkSamples: LIVE.chunkSamples,
+      label: 'tab',
+    });
+    const { room } = await r.guest.next('roomState');
+    await r.host.next('roomState');
+    return { ...r, streamId: room.live!.streamId };
+  }
+
+  it('keeps relaying after a rejected file command', async () => {
+    const { host, guest, streamId } = await liveRoom();
+    host.send({ type: 'command', action: 'pause' }); // nothing is playing -> rejected
+    expect((await host.next('error')).code).toBe('invalid_command');
+    host.send({ type: 'command', action: 'load', trackId: 'nope' }); // unknown -> rejected
+    expect((await host.next('error')).code).toBe('track_not_found');
+
+    host.ws.send(Buffer.from(encodeLiveChunk(streamId, 0, new Float32Array(100))));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(guest.binary).toHaveLength(1);
+    host.close();
+    guest.close();
+  });
+
+  it('ends the live share when the host leaves the room', async () => {
+    const { host, guest } = await liveRoom();
+    host.send({ type: 'leave' });
+    expect((await guest.next('roomState')).room.live).toBeNull();
+    host.close();
+    guest.close();
+  });
+});

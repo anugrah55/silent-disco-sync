@@ -198,6 +198,8 @@ export function attachWebSocket(
 
     switch (parsed.type) {
       case 'leave':
+        // No host, no audio: a host leaving mid-share ends the share.
+        if (client.isHost) room.live = null;
         rooms.leave(room, client);
         conn.room = null;
         conn.client = null;
@@ -296,8 +298,6 @@ export function attachWebSocket(
       room.live = null;
       return broadcastRoomState(room);
     }
-    // Any file command takes over from a live share.
-    room.live = null;
     if (cmd.action === 'load') {
       const info = rooms.trackInfo(room, cmd.trackId);
       if (!info || !info.available) {
@@ -328,6 +328,9 @@ export function attachWebSocket(
       );
     }
     room.playback = result.state;
+    // A successful file command takes over from a live share. (Only on success:
+    // clearing it for a rejected command would silence everyone without notice.)
+    room.live = null;
     broadcastRoomState(room);
   }
 

@@ -195,11 +195,16 @@ The host can play anything from another browser tab: YouTube, Spotify Web, Sound
 4. **Relay:** the server relays binary frames from the host only. It drops frames for stale
    streams, and drops rather than queues frames for listeners more than 1 MB behind.
 5. **Playback:** every device, the host included, plays chunk `n` at
-   `anchor + n × 100 ms + delay`, so they all sound together about 2 s behind the tab.
+   `anchor + n × 100 ms + delay`, so they all sound together about 2 s behind the tab. Chunks
+   are scheduled back to back from a cursor, which is steered toward that ideal time with the
+   same drift policy as tracks (rate nudge for 15-80 ms, jump beyond).
 6. **Seamless joins:** the receiver upsamples each chunk itself, continuing from the previous
    chunk's last sample, so chunk boundaries don't click.
 7. **No uplink bias:** the host holds its uploads while its clock runs a ping burst, so the pings
    don't queue behind its own audio.
+8. **Re-anchors without silence:** when the host reconnects, the new stream continues the old
+   sample timeline, so listeners hear no gap. Only a real capture-clock drift (judged on the
+   earliest arrivals over 5 s, so a stalled tab can't trigger it) starts a fresh timeline.
 
 The host must use desktop Chrome, Edge or Brave (Safari, Firefox and phones can't capture tab
 audio). Guests can use anything. Rebroadcast only what you have the right to play to the room.
@@ -336,7 +341,7 @@ origin, so there is no CORS and `wss://` just works. The Blueprint is `render.ya
 npm test
 ```
 
-67 tests, run with Vitest:
+69 tests, run with Vitest:
 
 - **clockSync** (deterministic fake network with seeded jitter and virtual time):
   - stable network, high jitter, uplink queueing, fixed asymmetry

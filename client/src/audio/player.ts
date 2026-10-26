@@ -20,6 +20,8 @@ export interface ActiveSource {
   serverStart: number;
   loop: boolean;
   duration: number;
+  /** Context time a stop is already scheduled for (a pending pause), if any. */
+  stopTime: number | null;
   /** Rate bookkeeping: position = ratePos + (ctxTime - rateCtx) * rate. */
   rate: number;
   rateCtx: number;
@@ -52,6 +54,16 @@ export class Player {
 
   /** Force the next apply() to reschedule even if the state is unchanged. */
   invalidate(): void {
+    this.appliedSeq = -1;
+  }
+
+  /**
+   * Stop right now and reschedule from scratch on the next apply(). Used after
+   * the AudioContext was suspended: anything scheduled before would otherwise
+   * play shifted by the length of the suspension.
+   */
+  hardReset(): void {
+    this.stopAt(null);
     this.appliedSeq = -1;
   }
 
@@ -106,11 +118,16 @@ export class Player {
     source.loop = track.loop;
     source.connect(audioEngine.output);
     source.start(ctxStart, startOffset);
-    // Hand over at the same instant, so seeks are gapless and echo-free.
-    try {
-      this.current?.source.stop(ctxStart);
-    } catch {
-      /* older Safari throws on a second stop() */
+    // Hand over at the same instant, so seeks are gapless and echo-free. If the
+    // old source already has an earlier stop (a pause), keep it: replacing it
+    // would play past the pause point and then repeat that audio.
+    const old = this.current;
+    if (old) {
+      try {
+        old.source.stop(old.stopTime !== null ? Math.min(old.stopTime, ctxStart) : ctxStart);
+      } catch {
+        /* older Safari throws on a second stop() */
+      }
     }
 
     const active: ActiveSource = {
@@ -122,6 +139,7 @@ export class Player {
       serverStart: startServer,
       loop: track.loop,
       duration,
+      stopTime: null,
       rate: 1,
       rateCtx: ctxStart,
       ratePos: startOffset,
@@ -231,6 +249,7 @@ export class Player {
     } catch {
       /* already stopped */
     }
+    cur.stopTime = ctxTime ?? 0;
     if (ctxTime === null) {
       cur.source.onended = null;
       this.current = null;

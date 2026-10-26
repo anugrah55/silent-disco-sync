@@ -61,6 +61,7 @@ export class RoomSession {
   private filePlaying = false;
   private readySent: string | null = null;
   private nudgeTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastStepAt = -1;
 
   constructor(readonly code: string) {
     this.conn = getConnection();
@@ -167,8 +168,9 @@ export class RoomSession {
         // keeps going; drift control absorbs any small difference.
         this.readySent = null;
         this.syncPlayback();
-        this.live.setLive(null);
-        // The server drops a live share when the host disconnects: start a new timeline.
+        // An unchanged live stream keeps playing (syncLive is a no-op for the same
+        // stream id). The server drops a share when the host disconnects, so a
+        // returning host starts a new timeline.
         if (this.capture.active) this.capture.reanchor();
         this.syncLive();
         this.reportSync();
@@ -196,8 +198,16 @@ export class RoomSession {
           this.set({ error: { code: msg.code, message: msg.message } });
         }
       }),
-      clock.onUpdate(() => {
+      clock.onUpdate((c) => {
         this.reportSync();
+        // The clock deliberately stepped mid-playback (big gap or a detected
+        // clock jump): re-schedule now rather than drift-correct for 20+ s.
+        const last = c.history.at(-1);
+        if (last && last.applied === 'step' && last.at !== this.lastStepAt && this.conn.playing) {
+          this.lastStepAt = last.at;
+          this.player.invalidate();
+          this.live.invalidate();
+        }
         // The first burst may land after the track decoded (late join): schedule now.
         this.syncPlayback();
         // A burst just ended: release any live audio held back during it.
@@ -222,8 +232,8 @@ export class RoomSession {
         // A context that was suspended (iOS interruption, autoplay) lost its
         // schedule; rejoin at the live position once it runs again.
         if (s === 'running') {
-          this.player.invalidate();
-          this.live.invalidate();
+          this.player.hardReset();
+          this.live.hardReset();
           this.syncPlayback();
         }
       }),
@@ -353,6 +363,8 @@ export class RoomSession {
   }
 
   leave(): void {
+    // End a live share while we're still in the room, or the server ignores it.
+    this.capture.stop();
     if (this.state.phase === 'joined') this.conn.socket.send({ type: 'leave' });
     this.detach();
     sessions.delete(this.code);

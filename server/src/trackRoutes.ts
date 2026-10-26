@@ -120,6 +120,12 @@ export function trackRouter(
         }
 
         const room = res.locals.room;
+        if (rooms.get(room.code) !== room) {
+          // The room expired while the file was uploading.
+          await rm(file.path, { force: true });
+          res.status(404).json({ error: 'Room not found' });
+          return;
+        }
         const id = `up-${randomBytes(5).toString('hex')}`;
         const info: TrackInfo = {
           id,

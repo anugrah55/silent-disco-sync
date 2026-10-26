@@ -18,6 +18,8 @@ const MAX_PENDING = 20;
  */
 const MAX_HOLD = 12;
 const CHUNK_MS = (LIVE.chunkSamples / LIVE.sampleRate) * 1000;
+/** Drift is judged over the last 5 s of chunks. */
+const DRIFT_WINDOW = 50;
 
 interface Hooks {
   clock: ClockSync;
@@ -63,6 +65,8 @@ export class LiveCapture {
   /** Stream id the server assigned to the current anchor; null until confirmed. */
   private streamId: number | null = null;
   private pending: Array<{ index: number; samples: Float32Array }> = [];
+  /** Recent arrival-vs-timeline drift (ms), newest last. */
+  private driftWindow: number[] = [];
 
   constructor(private readonly hooks: Hooks) {}
 
@@ -124,7 +128,7 @@ export class LiveCapture {
       mute.gain.value = 0;
       source.connect(node).connect(mute).connect(ctx.destination);
       this.node = node;
-      this.reanchor();
+      this.reanchor(false);
       this.hooks.onStatus({ state: 'live', label: this.label });
     } catch (err) {
       this.teardown();
@@ -153,12 +157,24 @@ export class LiveCapture {
    * up. Every device anchors on the same startServerMs, so a constant capture
    * latency shifts everyone equally and never hurts device-to-device sync.
    */
-  reanchor(): void {
+  reanchor(continueTimeline = true): void {
     if (!this.stream) return;
+    const chunksSoFar = this.index;
+    // Send what the current stream still holds before switching timelines.
+    if (this.streamId !== null) {
+      for (const p of this.pending) this.send(p.index, p.samples);
+    }
+    this.driftWindow = [];
     this.index = 0;
     this.streamId = null;
     this.pending = [];
-    this.anchorServerMs = this.hooks.clock.serverNow();
+    // Continuing the old sample timeline makes the new stream's chunk 0 land
+    // exactly where the old stream's next chunk would have: no gap, no overlap.
+    // Only a real capture-clock drift needs a fresh anchor.
+    this.anchorServerMs =
+      continueTimeline && this.anchorServerMs > 0
+        ? this.anchorServerMs + chunksSoFar * CHUNK_MS
+        : this.hooks.clock.serverNow();
     this.hooks.start({
       startServerMs: this.anchorServerMs,
       sampleRate: LIVE.sampleRate,
@@ -190,9 +206,18 @@ export class LiveCapture {
   private onChunk(samples: Float32Array): void {
     if (!this.stream) return;
     // Chunk `index` ends at anchor + (index + 1) * 100 ms on the sample timeline.
+    // A main-thread stall only ever makes chunks arrive *late*, so the smallest
+    // drift over the last few seconds is the real capture-clock drift; re-anchor
+    // only when even that is out of bounds (never because of one slow frame).
     const drift =
       this.hooks.clock.serverNow() - (this.anchorServerMs + (this.index + 1) * CHUNK_MS);
-    if (Math.abs(drift) > MAX_TIMELINE_DRIFT_MS) this.reanchor();
+    this.driftWindow.push(drift);
+    if (this.driftWindow.length > DRIFT_WINDOW) this.driftWindow.shift();
+    if (this.driftWindow.length === DRIFT_WINDOW) {
+      const min = Math.min(...this.driftWindow);
+      const max = Math.max(...this.driftWindow);
+      if (min > MAX_TIMELINE_DRIFT_MS || max < -MAX_TIMELINE_DRIFT_MS) this.reanchor(false);
+    }
 
     this.pending.push({ index: this.index++, samples });
     this.flush();
@@ -211,6 +236,10 @@ export class LiveCapture {
     this.ctx = null;
     this.streamId = null;
     this.pending = [];
+    // The next share starts its own timeline.
+    this.anchorServerMs = 0;
+    this.index = 0;
+    this.driftWindow = [];
   }
 }
 

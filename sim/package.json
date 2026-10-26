@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "sim": "tsx src/index.ts"
+    "sim": "tsx src/index.ts",
+    "realnet": "tsx src/realnet.ts"
   },
   "devDependencies": {
     "@types/ws": "^8.18.2",

@@ -13,8 +13,6 @@ coverage/
 *.key
 
 # local data
-sim/results/*.csv
-!sim/results/.gitkeep
 
 # os / editor
 .DS_Store

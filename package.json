@@ -21,7 +21,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "sim": "npm run sim -w sim --"
   },
   "devDependencies": {
     "concurrently": "^10.0.6",

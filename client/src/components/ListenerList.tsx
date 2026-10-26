@@ -8,7 +8,16 @@ const dot: Record<Quality, string> = {
   unknown: 'bg-haze/50 animate-pulse',
 };
 
-export function ListenerList({ members, meId }: { members: Member[]; meId: string }) {
+export function ListenerList({
+  members,
+  meId,
+  trackId = null,
+}: {
+  members: Member[];
+  meId: string;
+  /** The room's current track, to show who has it ready. */
+  trackId?: string | null;
+}) {
   const sorted = [...members].sort(
     (a, b) => Number(b.isHost) - Number(a.isHost) || a.name.localeCompare(b.name),
   );
@@ -34,7 +43,9 @@ export function ListenerList({ members, meId }: { members: Member[]; meId: strin
               </span>
               <span className="text-sm text-haze">
                 {m.isHost ? 'Host' : 'Listener'}
-                {!m.connected && ' · reconnecting'}
+                {!m.connected
+                  ? ' · reconnecting'
+                  : trackId && (m.readyTrackId === trackId ? ' · ready' : ' · loading track…')}
               </span>
             </span>
             <span

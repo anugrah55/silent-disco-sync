@@ -8,6 +8,8 @@ import { ROOM_CODE_RE } from '@sds/shared';
 import { serverNow } from './clock';
 import type { Config } from './config';
 import type { RoomManager } from './rooms';
+import { trackRouter } from './trackRoutes';
+import type { TrackLibrary } from './tracks';
 
 /** Where the built client lives (served in production, absent in dev). */
 export function clientDistDir(config: Config): string {
@@ -23,7 +25,11 @@ export function readBuildId(config: Config): string | null {
   }
 }
 
-export function createApp(config: Config, rooms: RoomManager): express.Express {
+export function createApp(
+  config: Config,
+  rooms: RoomManager,
+  library: TrackLibrary,
+): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -92,6 +98,8 @@ export function createApp(config: Config, rooms: RoomManager): express.Express {
     const listeners = [...room.clients.values()].filter((c) => c.ws !== null).length;
     res.json({ code: room.code, listeners });
   });
+
+  app.use('/api', trackRouter(rooms, library, config.uploadDir));
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found' });

@@ -59,6 +59,8 @@ export const trackInfoSchema = z.object({
   source: z.enum(['library', 'upload', 'builtin']),
   url: z.string().nullable(),
   available: z.boolean(),
+  /** Loops seamlessly (the click track); positions wrap at durationSec. */
+  loop: z.boolean(),
 });
 export type TrackInfo = z.infer<typeof trackInfoSchema>;
 
@@ -78,6 +80,8 @@ export const roomSnapshotSchema = z.object({
   members: z.array(memberSchema),
   playback: playbackStateSchema,
   track: trackInfoSchema.nullable(),
+  /** Tracks the host uploaded to this room (deleted when the room expires). */
+  uploads: z.array(trackInfoSchema),
   leadMs: finite,
 });
 export type RoomSnapshot = z.infer<typeof roomSnapshotSchema>;
@@ -96,7 +100,12 @@ export const joinMsg = z.object({
 
 export const leaveMsg = z.object({ type: z.literal('leave') });
 
-export const trackReadyMsg = z.object({ type: z.literal('trackReady'), trackId });
+export const trackReadyMsg = z.object({
+  type: z.literal('trackReady'),
+  trackId,
+  /** Decoded length; lets the server learn the duration of uploaded files. */
+  durationSec: finite.positive().optional(),
+});
 
 export const commandMsg = z.discriminatedUnion('action', [
   z.object({
@@ -177,6 +186,7 @@ export const errorCodeSchema = z.enum([
   'not_host',
   'track_not_found',
   'not_ready',
+  'invalid_command',
   'rate_limited',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
@@ -197,6 +207,10 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
 
 // ---------- REST ----------
+
+export const trackListResponseSchema = z.object({ tracks: z.array(trackInfoSchema) });
+
+export const uploadResponseSchema = z.object({ track: trackInfoSchema });
 
 export const createRoomResponseSchema = z.object({ code: roomCode, hostToken: z.string() });
 export type CreateRoomResponse = z.infer<typeof createRoomResponseSchema>;

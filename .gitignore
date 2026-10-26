@@ -15,10 +15,6 @@ coverage/
 # local data
 sim/results/*.csv
 !sim/results/.gitkeep
-server/assets/*.mp3
-server/assets/*.m4a
-server/assets/*.wav
-!server/assets/README.md
 
 # os / editor
 .DS_Store

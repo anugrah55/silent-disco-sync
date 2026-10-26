@@ -1,4 +1,9 @@
-import { createRoomResponseSchema, type CreateRoomResponse } from '@sds/shared';
+import {
+  createRoomResponseSchema,
+  trackListResponseSchema,
+  type CreateRoomResponse,
+  type TrackInfo,
+} from '@sds/shared';
 
 export class ApiError extends Error {
   constructor(
@@ -40,4 +45,10 @@ export function joinUrl(code: string): string {
 
 export function wsUrl(): string {
   return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+}
+
+export async function listTracks(): Promise<TrackInfo[]> {
+  const res = await fetch('/api/tracks');
+  if (!res.ok) throw await errorFrom(res);
+  return trackListResponseSchema.parse(await res.json()).tracks;
 }

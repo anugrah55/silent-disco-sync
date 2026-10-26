@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import { LEAD } from '@sds/shared';
 
 export interface Config {
@@ -7,6 +9,10 @@ export interface Config {
   leadMsDefault: number;
   trustProxy: number;
   clientDist: string | null;
+  /** Folder with tracks.json and the bundled audio. */
+  assetsDir: string;
+  /** Temp folder for host uploads; wiped on boot. */
+  uploadDir: string;
 }
 
 function int(value: string | undefined, fallback: number): number {
@@ -29,5 +35,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ),
     trustProxy: int(env.TRUST_PROXY, isProd ? 1 : 0),
     clientDist: env.CLIENT_DIST ?? null,
+    assetsDir: env.ASSETS_DIR ?? path.resolve(import.meta.dirname, '../assets'),
+    uploadDir: env.UPLOAD_DIR ?? path.join(os.tmpdir(), 'sds-uploads'),
   };
 }

@@ -1,4 +1,5 @@
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 import type { WebSocket } from 'ws';
 import {
   LIMITS,
@@ -12,6 +13,7 @@ import {
 } from '@sds/shared';
 import { serverNow } from './clock';
 import { autoLeadMs } from './leadTime';
+import type { TrackLibrary } from './tracks';
 
 /** How long a dropped client keeps its seat so a reconnect looks seamless. */
 export const DISCONNECT_GRACE_MS = 2 * 60 * 1000;
@@ -36,8 +38,14 @@ export interface Room {
   /** null = automatic lead time from worst RTT. */
   leadOverrideMs: number | null;
   lastActivity: number;
-  /** Absolute paths of uploaded files to delete when the room expires. */
-  uploads: string[];
+  /** Host uploads; files live in the OS temp dir and are deleted with the room. */
+  uploads: Map<string, Upload>;
+}
+
+export interface Upload {
+  info: TrackInfo;
+  path: string;
+  mime: string;
 }
 
 export type JoinResult =
@@ -47,10 +55,22 @@ export type JoinResult =
 export class RoomManager {
   readonly rooms = new Map<string, Room>();
   private sweepTimer: NodeJS.Timeout | null = null;
+  private changeListeners = new Set<(room: Room) => void>();
+
+  /** Subscribe to "room state changed outside the socket layer" (e.g. an HTTP upload). */
+  onChange(fn: (room: Room) => void): () => void {
+    this.changeListeners.add(fn);
+    return () => this.changeListeners.delete(fn);
+  }
+
+  changed(room: Room): void {
+    this.changeListeners.forEach((fn) => fn(room));
+  }
 
   constructor(
     private readonly opts: {
       leadMsDefault: number;
+      library?: TrackLibrary;
       onExpire?: (room: Room) => void;
       now?: () => number;
     },
@@ -87,7 +107,7 @@ export class RoomManager {
       track: null,
       leadOverrideMs: null,
       lastActivity: this.now(),
-      uploads: [],
+      uploads: new Map(),
     };
     this.rooms.set(code, room);
     return room;
@@ -183,6 +203,7 @@ export class RoomManager {
       members: this.members(room),
       playback: room.playback,
       track: room.track,
+      uploads: [...room.uploads.values()].map((u) => u.info),
       leadMs: this.leadMs(room),
     };
   }
@@ -200,7 +221,36 @@ export class RoomManager {
   destroy(room: Room): void {
     this.rooms.delete(room.code);
     for (const c of room.clients.values()) c.ws?.close(4004, 'room expired');
+    for (const u of room.uploads.values()) rm(u.path, { force: true }).catch(() => {});
+    room.uploads.clear();
     this.opts.onExpire?.(room);
+  }
+
+  /** Find an uploaded track in any room (for the streaming endpoint). */
+  findUpload(id: string): Upload | undefined {
+    for (const room of this.rooms.values()) {
+      const u = room.uploads.get(id);
+      if (u) return u;
+    }
+    return undefined;
+  }
+
+  /** Track metadata as seen from a room: library, built-in, or that room's uploads. */
+  trackInfo(room: Room, id: string): TrackInfo | undefined {
+    return room.uploads.get(id)?.info ?? this.opts.library?.info(id);
+  }
+
+  /** Register an upload, evicting the oldest one that isn't loaded when full. */
+  addUpload(room: Room, upload: Upload): void {
+    if (room.uploads.size >= LIMITS.maxUploadsPerRoom) {
+      const victim = [...room.uploads.values()].find((u) => u.info.id !== room.playback.trackId);
+      if (victim) {
+        room.uploads.delete(victim.info.id);
+        rm(victim.path, { force: true }).catch(() => {});
+      }
+    }
+    room.uploads.set(upload.info.id, upload);
+    this.touch(room);
   }
 
   startSweeper(intervalMs = 60_000): void {
@@ -220,7 +270,7 @@ export class RoomManager {
   }
 }
 
-function tokenEquals(a: string, b: string): boolean {
+export function tokenEquals(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
   return ab.length === bb.length && timingSafeEqual(ab, bb);

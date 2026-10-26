@@ -4,6 +4,8 @@ import { pathToFileURL } from 'node:url';
 import { createApp, readBuildId } from './app';
 import { loadConfig, type Config } from './config';
 import { RoomManager } from './rooms';
+import { TrackLibrary } from './tracks';
+import { mkdirSync, rmSync } from 'node:fs';
 import { attachWebSocket } from './ws';
 
 export interface Running {
@@ -15,8 +17,12 @@ export interface Running {
 
 export async function startServer(overrides: Partial<Config> = {}): Promise<Running> {
   const config = { ...loadConfig(), ...overrides };
-  const rooms = new RoomManager({ leadMsDefault: config.leadMsDefault });
-  const app = createApp(config, rooms);
+  // Uploads never outlive the process: start from an empty temp folder.
+  rmSync(config.uploadDir, { recursive: true, force: true });
+  mkdirSync(config.uploadDir, { recursive: true });
+  const library = new TrackLibrary(config.assetsDir);
+  const rooms = new RoomManager({ leadMsDefault: config.leadMsDefault, library });
+  const app = createApp(config, rooms, library);
   const server = createServer(app);
   const wss = attachWebSocket(server, rooms, {
     allowedOrigins: config.allowedOrigins,
@@ -33,6 +39,7 @@ export async function startServer(overrides: Partial<Config> = {}): Promise<Runn
     port,
     close: async () => {
       rooms.stop();
+      for (const room of [...rooms.rooms.values()]) rooms.destroy(room);
       for (const ws of wss.clients) ws.terminate();
       wss.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

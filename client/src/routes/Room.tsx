@@ -4,6 +4,8 @@ import { LIMITS, ROOM_CODE_RE } from '@sds/shared';
 import { audioEngine } from '../audio/engine';
 import { ConnectionPill } from '../components/ConnectionPill';
 import { ListenerList } from '../components/ListenerList';
+import { NowPlaying } from '../components/NowPlaying';
+import { TrackPicker } from '../components/TrackPicker';
 import { QrCode } from '../components/QrCode';
 import { SoundOverlay } from '../components/SoundOverlay';
 import { joinUrl, roomExists } from '../lib/api';
@@ -122,23 +124,23 @@ function Room({ code }: { code: string }) {
         {state.isHost && <p className="mt-1 text-sm text-neon-cyan">You're the host</p>}
       </section>
 
-      {state.isHost ? (
-        <section className="card flex flex-col items-center gap-4" aria-label="Invite listeners">
-          <QrCode value={url} />
-          <p className="text-center text-sm break-all text-haze">{url}</p>
-          {onLocalhost && !import.meta.env.VITE_PUBLIC_ORIGIN && (
-            <p role="note" className="rounded-xl bg-ok/15 px-3 py-2 text-sm text-ok">
-              This QR points at localhost, which phones can't reach. Open this page via your
-              laptop's LAN IP (Vite prints it as "Network"), or set VITE_PUBLIC_ORIGIN.
-            </p>
-          )}
-          <ShareButton url={url} code={code} />
-        </section>
-      ) : (
-        <section className="card text-center">
-          <p className="text-lg">You're in{me ? `, ${me.name}` : ''}.</p>
-          <p className="text-haze">Waiting for the host to pick a track.</p>
-        </section>
+      {state.room && <NowPlaying session={session} state={state} />}
+
+      {state.isHost && state.room && <TrackPicker session={session} state={state} />}
+
+      {state.isHost && (
+        <InviteCard
+          url={url}
+          code={code}
+          onLocalhost={onLocalhost}
+          // Big QR until the music starts; then it folds away to keep controls in reach.
+          compact={!!state.room?.track}
+        />
+      )}
+      {!state.isHost && me && (
+        <p className="text-center text-sm text-haze">
+          You're in, {me.name}. Keep this screen open and the volume up.
+        </p>
       )}
 
       <section className="card" aria-labelledby="listeners-h">
@@ -151,13 +153,17 @@ function Room({ code }: { code: string }) {
           </Link>
         </div>
         {state.room ? (
-          <ListenerList members={state.room.members} meId={state.clientId} />
+          <ListenerList
+            members={state.room.members}
+            meId={state.clientId}
+            trackId={state.room.playback.trackId}
+          />
         ) : (
           <p className="py-4 text-haze">Connecting…</p>
         )}
       </section>
 
-      {state.error && state.phase === 'joined' && (
+      {state.error && state.phase === 'joined' && state.error.code !== 'not_ready' && (
         <p role="alert" className="rounded-2xl bg-bad/15 px-4 py-3 text-bad">
           {state.error.message}
         </p>
@@ -224,6 +230,49 @@ function JoinGate({
         </p>
       </form>
     </main>
+  );
+}
+
+function InviteCard({
+  url,
+  code,
+  onLocalhost,
+  compact,
+}: {
+  url: string;
+  code: string;
+  onLocalhost: boolean;
+  compact: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const showQr = !compact || expanded;
+  return (
+    <section className="card flex flex-col items-center gap-4" aria-label="Invite listeners">
+      {compact && (
+        <button
+          type="button"
+          className="flex w-full items-center justify-between text-left"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((e) => !e)}
+        >
+          <span className="font-display text-lg font-bold">Invite more people</span>
+          <span className="text-sm text-haze">{expanded ? 'Hide QR' : 'Show QR'}</span>
+        </button>
+      )}
+      {showQr && (
+        <>
+          <QrCode value={url} />
+          <p className="text-center text-sm break-all text-haze">{url}</p>
+          {onLocalhost && !import.meta.env.VITE_PUBLIC_ORIGIN && (
+            <p role="note" className="rounded-xl bg-ok/15 px-3 py-2 text-sm text-ok">
+              This QR points at localhost, which phones can't reach. Open this page via your
+              laptop's LAN IP (Vite prints it as "Network"), or set VITE_PUBLIC_ORIGIN.
+            </p>
+          )}
+        </>
+      )}
+      <ShareButton url={url} code={code} />
+    </section>
   );
 }
 

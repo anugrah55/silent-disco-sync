@@ -5,7 +5,9 @@ import {
   LIMITS,
   WS_PATH,
   clientMessageSchema,
+  applyCommand,
   type ClientMessage,
+  type CommandMessage,
   type ErrorCode,
   type ServerMessage,
 } from '@sds/shared';
@@ -52,6 +54,7 @@ export function attachWebSocket(
     perMessageDeflate: false,
   });
   const conns = new Map<WebSocket, Conn>();
+  const offChange = rooms.onChange((room) => broadcastRoomState(room));
   const presenceTimers = new Map<Room, NodeJS.Timeout>();
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -99,6 +102,7 @@ export function attachWebSocket(
   heartbeat.unref();
   wss.on('close', () => {
     clearInterval(heartbeat);
+    offChange();
     for (const t of presenceTimers.values()) clearTimeout(t);
   });
 
@@ -186,11 +190,61 @@ export function attachWebSocket(
       case 'nudgeReport':
         client.nudgeMs = parsed.nudgeMs;
         return schedulePresence(room);
-      case 'trackReady':
+      case 'trackReady': {
+        client.readyTrackId = parsed.trackId;
+        const upload = room.uploads.get(parsed.trackId);
+        // Uploads have no known length until a client decodes one.
+        if (upload && upload.info.durationSec === null && parsed.durationSec) {
+          upload.info = { ...upload.info, durationSec: parsed.durationSec };
+          if (room.track?.id === upload.info.id) room.track = upload.info;
+          return broadcastRoomState(room);
+        }
+        return schedulePresence(room);
+      }
       case 'command':
-        // Playback lands in Phase 3.
-        return sendError(conn, 'bad_message', `${parsed.type} is not available yet`);
+        if (!client.isHost)
+          return sendError(conn, 'not_host', 'Only the host can control playback.');
+        return handleCommand(conn, room, parsed);
     }
+  }
+
+  function handleCommand(conn: Conn, room: Room, cmd: CommandMessage): void {
+    rooms.touch(room);
+    if (cmd.action === 'setLead') {
+      room.leadOverrideMs = cmd.leadMs;
+      return broadcastRoomState(room);
+    }
+    if (cmd.action === 'load') {
+      const info = rooms.trackInfo(room, cmd.trackId);
+      if (!info || !info.available) {
+        return sendError(conn, 'track_not_found', 'That track is not available.');
+      }
+      room.track = info;
+    }
+    if (cmd.action === 'play' && !cmd.force && room.playback.trackId) {
+      const waiting = [...room.clients.values()].filter(
+        (c) => c.ws && c.readyTrackId !== room.playback.trackId,
+      );
+      if (waiting.length > 0) {
+        const names = waiting.map((c) => c.name).join(', ');
+        return sendError(conn, 'not_ready', `Still loading on ${waiting.length}: ${names}`);
+      }
+    }
+    const result = applyCommand(room.playback, cmd, {
+      nowMs: serverNow(),
+      leadMs: rooms.leadMs(room),
+      durationSec: room.track?.durationSec ?? null,
+      loop: room.track?.loop ?? false,
+    });
+    if (!result.ok) {
+      return sendError(
+        conn,
+        'invalid_command',
+        result.reason === 'no_track' ? 'Pick a track first.' : 'Nothing is playing.',
+      );
+    }
+    room.playback = result.state;
+    broadcastRoomState(room);
   }
 
   function handleJoin(conn: Conn, msg: Extract<ClientMessage, { type: 'join' }>): void {

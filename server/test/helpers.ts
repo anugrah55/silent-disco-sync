@@ -1,9 +1,16 @@
+import { mkdtempSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import WebSocket from 'ws';
 import { serverMessageSchema, type ClientMessage, type ServerMessage } from '@sds/shared';
 import { startServer, type Running } from '../src/index';
 
 export async function boot(): Promise<Running & { base: string; wsUrl: string }> {
-  const running = await startServer({ port: 0, clientDist: '/nonexistent' });
+  const running = await startServer({
+    port: 0,
+    clientDist: '/nonexistent',
+    uploadDir: mkdtempSync(path.join(os.tmpdir(), 'sds-test-')),
+  });
   return {
     ...running,
     base: `http://127.0.0.1:${running.port}`,

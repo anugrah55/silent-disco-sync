@@ -34,4 +34,5 @@ export const keys = {
   hostToken: (code: string) => `sds.host.${code}`,
   nudge: 'sds.nudgeMs',
   reducedFlash: 'sds.reducedFlash',
+  volume: 'sds.volume',
 } as const;

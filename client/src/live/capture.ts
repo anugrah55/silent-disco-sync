@@ -11,6 +11,12 @@ export type CaptureStatus =
 const MAX_TIMELINE_DRIFT_MS = 400;
 /** Chunks held while waiting for the server to confirm a new stream (~2 s). */
 const MAX_PENDING = 20;
+/**
+ * Chunks held while our clock runs a ping burst. Audio frames queued ahead of
+ * pings on the uplink would bias this device's offset estimate; 1.2 s fits
+ * comfortably inside the >= 2 s playout delay.
+ */
+const MAX_HOLD = 12;
 const CHUNK_MS = (LIVE.chunkSamples / LIVE.sampleRate) * 1000;
 
 interface Hooks {
@@ -25,6 +31,8 @@ interface Hooks {
   stop: () => void;
   sendBinary: (data: ArrayBuffer) => boolean;
   onStatus: (s: CaptureStatus) => void;
+  /** True while sending should pause (the clock is mid-burst). */
+  holdAudio: () => boolean;
 }
 
 /** Whether this browser can capture another tab's audio (desktop Chromium). */
@@ -164,6 +172,17 @@ export class LiveCapture {
     if (!this.stream || !live || this.streamId === live.streamId) return;
     if (Math.abs(live.startServerMs - this.anchorServerMs) > 0.5) return; // an older anchor
     this.streamId = live.streamId;
+    this.flush();
+  }
+
+  /** Send held chunks unless we still have to wait (unconfirmed stream, or a sync burst). */
+  flush(): void {
+    if (this.streamId === null) {
+      if (this.pending.length > MAX_PENDING)
+        this.pending.splice(0, this.pending.length - MAX_PENDING);
+      return;
+    }
+    if (this.hooks.holdAudio() && this.pending.length < MAX_HOLD) return;
     for (const p of this.pending) this.send(p.index, p.samples);
     this.pending = [];
   }
@@ -175,12 +194,8 @@ export class LiveCapture {
       this.hooks.clock.serverNow() - (this.anchorServerMs + (this.index + 1) * CHUNK_MS);
     if (Math.abs(drift) > MAX_TIMELINE_DRIFT_MS) this.reanchor();
 
-    const index = this.index++;
-    if (this.streamId === null) {
-      if (this.pending.length < MAX_PENDING) this.pending.push({ index, samples });
-      return;
-    }
-    this.send(index, samples);
+    this.pending.push({ index: this.index++, samples });
+    this.flush();
   }
 
   private send(index: number, samples: Float32Array): void {

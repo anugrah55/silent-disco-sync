@@ -85,6 +85,7 @@ export class RoomSession {
       stop: () => this.command({ action: 'liveStop' }),
       sendBinary: (d) => this.conn.socket.sendBinary(d),
       onStatus: (liveCapture) => this.set({ liveCapture }),
+      holdAudio: () => this.conn.clock.bursting,
     });
   }
 
@@ -188,6 +189,8 @@ export class RoomSession {
         this.reportSync();
         // The first burst may land after the track decoded (late join): schedule now.
         this.syncPlayback();
+        // A burst just ended: release any live audio held back during it.
+        this.capture.flush();
       }),
       nudge.subscribe(() => {
         if (this.state.phase === 'joined')

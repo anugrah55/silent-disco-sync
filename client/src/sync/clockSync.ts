@@ -222,6 +222,11 @@ export class ClockSync {
     return this.hasEstimate;
   }
 
+  /** A ping burst is in flight (heavy uploads should pause so pings aren't queued). */
+  get bursting(): boolean {
+    return this.burst !== null;
+  }
+
   /** Offset currently applied (server - local), including any slew in progress. */
   get offsetMs(): number {
     return this.appliedAt(this.clock.now());

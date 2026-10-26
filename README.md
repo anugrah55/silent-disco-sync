@@ -4,6 +4,8 @@ Turn a group of phones into one synchronized sound system. A host opens a room, 
 QR code, and at a scheduled instant every phone starts the same audio within a few milliseconds
 of the others.
 
+**Live:** https://silent-disco-sync.onrender.com (free tier: the first visit after ~15 min idle takes ~30-60 s to wake)
+
 > Work in progress. The full README (architecture, how clock sync works, measured accuracy)
 > lands in Phase 6.
 
